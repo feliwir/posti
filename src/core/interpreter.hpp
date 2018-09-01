@@ -3,7 +3,7 @@
 
 namespace ps
 {
-  class Processor
+  class Interpreter
   {
   public:
     void Load(std::istream& input);

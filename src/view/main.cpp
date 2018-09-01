@@ -1,6 +1,6 @@
 #include <fstream>
 #include <cxxopts.hpp>
-#include "processor.hpp"
+#include "interpreter.hpp"
 
 int main(int argc, char** argv)
 {
@@ -30,9 +30,9 @@ int main(int argc, char** argv)
     return -1;
   }
 
-  ps::Processor psp;
+  ps::Interpreter psi;
 
-  psp.Load(fin);
+  psi.Load(fin);
 
   return 0;
 }

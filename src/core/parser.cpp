@@ -1,8 +1,8 @@
-#include "processor.hpp"
+#include "parser.hpp"
 #include "util.hpp"
 #include <string>
 
-void ps::Processor::Load(std::istream& input)
+ps::Parser::Parser(std::istream& input) : m_input(input)
 {
   std::string line;
 
@@ -21,4 +21,9 @@ void ps::Processor::Load(std::istream& input)
 
 
   }
+}
+
+std::shared_ptr<ps::Object> ps::Parser::GetObject() const
+{
+  return nullptr;
 }

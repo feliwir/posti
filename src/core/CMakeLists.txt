@@ -1,5 +1,7 @@
 add_library(pscore STATIC 
-processor.cpp processor.hpp
+interpreter.cpp interpreter.hpp
+object.hpp
+parser.cpp parser.hpp
 util.hpp)
 
 target_link_libraries(pscore b2d)
