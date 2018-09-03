@@ -28,7 +28,41 @@ namespace ps
         }
 
         protected:
-        ObjectFlag m_flag;
-        ObjectAccess m_access;
+        ObjectFlag m_flag = ObjectFlag::Literal;
+        ObjectAccess m_access = ObjectAccess::Unlimited;
+    };
+
+    class NameObject final : public Object
+    {
+    public:
+      inline NameObject(std::string_view view,bool executable = true)
+      {
+        m_name = view;
+        m_flag = executable ? ObjectFlag::Executable : ObjectFlag::Literal;
+      }
+    private:
+      std::string m_name;
+    };
+
+    class IntegerObject final : public Object
+    {
+    public:
+      inline IntegerObject(const int value)
+      {
+        m_value = value;
+      }
+    private:
+      int m_value;
+    };
+
+    class RealObject final : public Object
+    {
+    public:
+      inline RealObject(const float value)
+      {
+        m_value = value;
+      }
+    private:
+      float m_value;
     };
 }
