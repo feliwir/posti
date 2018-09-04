@@ -1,5 +1,6 @@
 add_library(pscore STATIC
 builtins.cpp builtins.hpp
+graphicsstate.hpp
 interpreter.cpp interpreter.hpp
 object.hpp
 objects/integer.hpp
