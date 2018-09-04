@@ -6,6 +6,7 @@ objects/name.hpp
 objects/operand.hpp
 objects/real.hpp
 objects/string.hpp
+graphicsstate.hpp
 parser.cpp parser.hpp
 util.hpp)
 
