@@ -18,7 +18,7 @@ std::map<std::string, std::shared_ptr<ps::Object>> ps::Builtins::CreateDictionar
 
   auto getInt = [&s](std::shared_ptr<ps::Object> o)
   {
-    return std::dynamic_pointer_cast<IntegerObject>(o)->GetValue();
+    return std::static_pointer_cast<IntegerObject>(o)->GetValue();
   };
 
   //STACK

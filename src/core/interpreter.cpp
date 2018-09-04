@@ -6,6 +6,8 @@
 ps::Interpreter::Interpreter()
 {
   m_systemDict = Builtins::CreateDictionary(this);
+
+  m_dictStack.push(m_systemDict);
 }
 
 void ps::Interpreter::Load(std::istream& input)
