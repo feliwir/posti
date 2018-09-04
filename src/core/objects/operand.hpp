@@ -1,16 +1,26 @@
 #pragma once
 #include "../object.hpp"
+#include <functional>
+#include <memory>
+#include <stack>
 
 namespace ps
 {
     class OperandObject final : public Object
     {
     public:
-      inline OperandObject(const int value)
+      inline OperandObject(std::function<void()> func)
       {
-        m_value = value;
+        m_func = func;
+        m_type = ObjectType::Operand;
       }
+
+      inline void Execute()
+      {
+        m_func();
+      }
+
     private:
-      int m_value;
+      std::function<void()> m_func;
     };
 }

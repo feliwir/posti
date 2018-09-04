@@ -11,6 +11,7 @@ namespace ps
       {
         m_name = view;
         m_flag = executable ? ObjectFlag::Executable : ObjectFlag::Literal;
+        m_type = ObjectType::Name;
       }
     private:
       std::string m_name;

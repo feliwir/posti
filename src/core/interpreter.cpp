@@ -1,6 +1,12 @@
 #include "interpreter.hpp"
 #include "parser.hpp"
+#include "builtins.hpp"
 #include <string>
+
+ps::Interpreter::Interpreter()
+{
+  m_systemDict = Builtins::CreateDictionary(this);
+}
 
 void ps::Interpreter::Load(std::istream& input)
 {
@@ -10,7 +16,7 @@ void ps::Interpreter::Load(std::istream& input)
   {
     //Push literal objects to the operand stack
     if (!obj->IsExecutable())
-      m_operands.push(obj);
+      m_opStack.push(obj);
     else
     {
       //do some check stuff

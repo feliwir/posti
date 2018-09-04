@@ -5,7 +5,7 @@ namespace ps
     enum class ObjectFlag
     {
         Literal,
-        Executable
+        Executable,
     };
 
     enum class ObjectAccess
@@ -14,6 +14,16 @@ namespace ps
         ReadOnly,
         ExecuteOnly,
         None,
+    };
+
+    enum class ObjectType
+    {
+      None,
+      Operand,
+      Name,
+      Real,
+      Integer,
+      String
     };
 
     class Object
@@ -27,8 +37,13 @@ namespace ps
             return m_access;
         }
 
+        inline ObjectType GetType() {
+          return m_type;
+        }
+
         protected:
         ObjectFlag m_flag = ObjectFlag::Literal;
         ObjectAccess m_access = ObjectAccess::Unlimited;
+        ObjectType m_type = ObjectType::None;
     };
 }

@@ -10,6 +10,11 @@ namespace ps
       {
         m_value = value;
       }
+
+      inline int GetValue()
+      {
+        return m_value;
+      }
     private:
       int m_value;
     };

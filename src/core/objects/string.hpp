@@ -9,6 +9,7 @@ namespace ps
       inline StringObject(const int value)
       {
         m_value = value;
+        m_type = ObjectType::String;
       }
     private:
       int m_value;

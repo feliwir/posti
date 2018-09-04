@@ -9,6 +9,7 @@ namespace ps
       inline RealObject(const float value)
       {
         m_value = value;
+        m_type = ObjectType::Real;
       }
     private:
       float m_value;

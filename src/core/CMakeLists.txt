@@ -1,4 +1,5 @@
-add_library(pscore STATIC 
+add_library(pscore STATIC
+builtins.cpp builtins.hpp
 interpreter.cpp interpreter.hpp
 object.hpp
 objects/integer.hpp
