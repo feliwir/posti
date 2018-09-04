@@ -1,5 +1,8 @@
 #include "parser.hpp"
 #include "util.hpp"
+#include "objects/integer.hpp"
+#include "objects/real.hpp"
+#include "objects/name.hpp"
 #include <string>
 #include <cctype>
 

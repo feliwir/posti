@@ -1,6 +1,7 @@
 #pragma once
 #include <istream>
 #include <stack>
+#include <map>
 
 namespace ps
 {
@@ -12,9 +13,7 @@ namespace ps
     void Load(std::istream& input);
 
   private:
-    static constexpr int MAX_BUFFER_SIZE = 4096;
-    char m_buffer[MAX_BUFFER_SIZE];
-    int m_bufSize;
     std::stack<std::shared_ptr<Object>> m_operands;
+    std::stack<std::map<std::string, std::shared_ptr<Object>> > m_dictionary;
   };
 }
