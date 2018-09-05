@@ -24,8 +24,71 @@ std::map<std::string, std::shared_ptr<ps::Object>> ps::Builtins::CreateDictionar
   //STACK
   //POP
   dict["pop"] = std::make_shared<OperandObject>([&]() {
-    s.pop();
+    pop();
   });
+
+  //STACK
+  //EXCH
+  dict["exch"] = std::make_shared<OperandObject>([&]() {
+    auto first = pop();
+    auto second = pop();
+    s.push(first);
+    s.push(second);
+  });
+
+  //STACK
+  //DUP
+  dict["dup"] = std::make_shared<OperandObject>([&]() {
+    s.push(s.top());
+  });
+
+  //STACK
+  //copy
+  dict["copy"] = std::make_shared<OperandObject>([&]() {
+    int n = getInt(pop());
+    auto vec = std::vector<std::shared_ptr<ps::Object>>();
+    for (int i = 0; i < n; i++)
+    	vec.push_back(pop());
+    for (int i = n - 1; i >= 0; i--)
+    	s.push(vec[i]);
+    for (int i = n - 1; i >= 0; i--)
+    	s.push(vec[i]);
+  });
+
+  //STACK
+  //index
+  dict["index"] = std::make_shared<OperandObject>([&]() {
+    int n = getInt(pop());
+    auto vec = std::vector<std::shared_ptr<ps::Object>>();
+    for (int i = 0; i < n; i++)
+    	vec.push_back(pop());
+    for (int i = n - 1; i >= 0; i--)
+    	s.push(vec[i]);
+    s.push(vec[n - 1]);
+  });
+
+  //STACK
+  //roll
+  dict["roll"] = std::make_shared<OperandObject>([&]() {
+    int j = getInt(pop());
+    int n = getInt(pop());
+    // ??
+  });
+
+  //STACK
+  //clear
+  dict["clear"] = std::make_shared<OperandObject>([&]() {
+    while(!s.empty())
+    	s.pop();
+  });
+
+  //STACK
+  //count
+  dict["count"] = std::make_shared<OperandObject>([&]() {
+    s.push(std::make_shared<IntegerObject>(s.size()));
+  });
+
+
 
   //ARITHMETIC
   //ADD
