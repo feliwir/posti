@@ -25,7 +25,7 @@ std::shared_ptr<ps::Object> ps::Interpreter::DictLookup(std::shared_ptr<Object> 
     }
   }
 
-  std::cerr << "Missing name: " << str;
+  std::cerr << "Missing name: " << str << std::endl;
 
   return nullptr;
 }

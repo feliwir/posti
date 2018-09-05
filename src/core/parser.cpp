@@ -24,83 +24,56 @@ std::shared_ptr<ps::Object> ps::Parser::GetObject()
     if (c == '\r')
       continue;
 
-    //TODO: simplify this a lot
+    //Skip any comments 
+    if (m == Mode::Comment)
+    {
+      if (isNewline(c))
+        m = Mode::None;
+
+      continue;
+    }
+
+    //Handle delimitters
+    if (isWhitespace(c) || isNewline(c))
+    {
+      if (m != Mode::None)
+        finished = true;
+
+      continue;
+    }
+
+    //Go into comment mode
+    if (m!= Mode::String && isComment(c))
+    {
+      m = Mode::Comment;
+      continue;
+    }
+
+    //Store the character
+    m_buffer += c;
+
+    //Handle any transitions
     switch (m)
     {
-    case ps::Parser::Mode::None:
-      if (isWhitespace(c) || isNewline(c))
-      {
-        continue;
-      }
-      else if (isComment(c))
-      {
-        m = Mode::Comment;
-      }
-      else if (std::isdigit(c) || isSign(c) )
-      {
-        m_buffer += c;
+    case Mode::None:
+      if (std::isdigit(c) || isSign(c) )
         m = Mode::Integer;
-      }
       else
-      {
-        m_buffer += c;
         m = Mode::Name;
-      }
       break;
-    case ps::Parser::Mode::Integer:
-      if (isWhitespace(c) || isNewline(c))
-      {
-        finished = true;
-      }
-      else if (std::isdigit(c))
-      {
-        m_buffer += c;
-      }
-      else if (c == 'E' || c == '.')
-      {
-        m_buffer += c;
+    case Mode::Integer:
+      if (c == 'E' || c == '.')  
         m = Mode::Real;
-      }
-      else
-      {
-        m_buffer += c;
+      else if(!std::isdigit(c))
         m = Mode::Name;
-      }
       break;
-    case ps::Parser::Mode::Real:
-      if (isWhitespace(c) || isNewline(c))
-      {
-        finished = true;
-      }
-      else if (std::isdigit(c))
-      {
-        m_buffer += c;
-      }
-      else if (c == 'E' || c == '.')
-      {
-        m_buffer += c;
+    case Mode::Real:
+      if (c == 'E' || c == '.')
         m = Mode::Name;
-      }
       break;
-    case ps::Parser::Mode::String:
+    case Mode::String:
       break;
-    case ps::Parser::Mode::Name:
-      if (isWhitespace(c) || isNewline(c))
-      {
-        finished = true;
-      }
-      else
-      {
-        m_buffer += c;
-      }
-      break;
-    case ps::Parser::Mode::Array:
-      break;
-    case ps::Parser::Mode::Comment:
-      if (isNewline(c))
-      {
-        m = Mode::None;
-      }
+    case Mode::Array:
       break;
     default:
       break;
