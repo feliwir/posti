@@ -60,11 +60,11 @@ std::map<std::string, std::shared_ptr<ps::Object>> ps::Builtins::CreateDictionar
   dict["index"] = std::make_shared<OperandObject>([&]() {
     int n = getInt(pop());
     auto vec = std::vector<std::shared_ptr<ps::Object>>();
-    for (int i = 0; i < n; i++)
+    for (int i = 0; i < n + 1; i++)
     	vec.push_back(pop());
-    for (int i = n - 1; i >= 0; i--)
+    for (int i = n; i >= 0; i--)
     	s.push(vec[i]);
-    s.push(vec[n - 1]);
+    s.push(vec[n]);
   });
 
   //STACK
