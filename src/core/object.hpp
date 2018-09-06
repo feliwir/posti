@@ -2,48 +2,51 @@
 
 namespace ps
 {
-    enum class ObjectFlag
+enum class ObjectFlag
+{
+    Literal,
+    Executable,
+};
+
+enum class ObjectAccess
+{
+    Unlimited,
+    ReadOnly,
+    ExecuteOnly,
+    None,
+};
+
+enum class ObjectType
+{
+    None,
+    Operand,
+    Name,
+    Real,
+    Integer,
+    String
+};
+
+class Object
+{
+  public:
+    inline bool IsExecutable()
     {
-        Literal,
-        Executable,
-    };
+        return m_flag == ObjectFlag::Executable;
+    }
 
-    enum class ObjectAccess
+    inline ObjectAccess GetAccess()
     {
-        Unlimited,
-        ReadOnly,
-        ExecuteOnly,
-        None,
-    };
+        return m_access;
+    }
 
-    enum class ObjectType
+    inline ObjectType GetType()
     {
-      None,
-      Operand,
-      Name,
-      Real,
-      Integer,
-      String
-    };
+        return m_type;
+    }
 
-    class Object
-    {
-        public:
-        inline bool IsExecutable() {
-            return m_flag == ObjectFlag::Executable;
-        }
-
-        inline ObjectAccess GetAccess() {
-            return m_access;
-        }
-
-        inline ObjectType GetType() {
-          return m_type;
-        }
-
-        protected:
-        ObjectFlag m_flag = ObjectFlag::Literal;
-        ObjectAccess m_access = ObjectAccess::Unlimited;
-        ObjectType m_type = ObjectType::None;
-    };
-}
+  protected:
+    ObjectFlag m_flag = ObjectFlag::Literal;
+    ObjectAccess m_access = ObjectAccess::Unlimited;
+    ObjectType m_type = ObjectType::None;
+};
+} // namespace ps

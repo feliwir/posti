@@ -9,6 +9,7 @@ objects/operand.hpp
 objects/real.hpp
 objects/string.hpp
 parser.cpp parser.hpp
+renderer.cpp renderer.hpp
 util.hpp)
 
 target_link_libraries(pscore b2d)

@@ -3,15 +3,16 @@
 
 namespace ps
 {
-    class RealObject final : public Object
-    {
-    public:
-      inline RealObject(const float value)
-      {
-        m_value = value;
-        m_type = ObjectType::Real;
-      }
-    private:
-      float m_value;
-    };
-}
+class RealObject final : public Object
+{
+public:
+  inline RealObject(const float value)
+  {
+    m_value = value;
+    m_type = ObjectType::Real;
+  }
+
+private:
+  float m_value;
+};
+} // namespace ps

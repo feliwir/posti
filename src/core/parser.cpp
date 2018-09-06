@@ -6,7 +6,7 @@
 #include <string>
 #include <cctype>
 
-ps::Parser::Parser(std::istream& input) : m_input(input)
+ps::Parser::Parser(std::istream &input) : m_input(input)
 {
 }
 
@@ -24,7 +24,7 @@ std::shared_ptr<ps::Object> ps::Parser::GetObject()
     if (c == '\r')
       continue;
 
-    //Skip any comments 
+    //Skip any comments
     if (m == Mode::Comment)
     {
       if (isNewline(c))
@@ -43,7 +43,7 @@ std::shared_ptr<ps::Object> ps::Parser::GetObject()
     }
 
     //Go into comment mode
-    if (m!= Mode::String && isComment(c))
+    if (m != Mode::String && isComment(c))
     {
       m = Mode::Comment;
       continue;
@@ -56,15 +56,15 @@ std::shared_ptr<ps::Object> ps::Parser::GetObject()
     switch (m)
     {
     case Mode::None:
-      if (std::isdigit(c) || isSign(c) )
+      if (std::isdigit(c) || isSign(c))
         m = Mode::Integer;
       else
         m = Mode::Name;
       break;
     case Mode::Integer:
-      if (c == 'E' || c == '.')  
+      if (c == 'E' || c == '.')
         m = Mode::Real;
-      else if(!std::isdigit(c))
+      else if (!std::isdigit(c))
         m = Mode::Name;
       break;
     case Mode::Real:

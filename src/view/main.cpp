@@ -2,15 +2,13 @@
 #include <cxxopts.hpp>
 #include "interpreter.hpp"
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
   cxxopts::Options options("psview", "A viewer for postscript files/programs.");
 
   std::string fileInput;
 
-  options.add_options()
-    ("f,file", "File name", cxxopts::value<std::string>(fileInput))
-    ;
+  options.add_options()("f,file", "File name", cxxopts::value<std::string>(fileInput));
 
   auto result = options.parse(argc, argv);
 

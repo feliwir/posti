@@ -7,25 +7,31 @@
 
 namespace ps
 {
-  class Object;
+class Object;
+enum class ScriptMode
+{
+  Standalone,
+  Embedded,
+};
 
-  class Interpreter
+class Interpreter
+{
+public:
+  Interpreter(ScriptMode mode = ScriptMode::Standalone);
+  void Load(std::istream &input);
+
+  inline std::stack<std::shared_ptr<Object>> &GetOperandStack()
   {
-  public:
-    Interpreter();
-    void Load(std::istream& input);
+    return m_opStack;
+  }
 
-    inline std::stack<std::shared_ptr<Object>>& GetOperandStack()
-    {
-      return m_opStack;
-    }
+private:
+  std::shared_ptr<Object> DictLookup(std::shared_ptr<Object> name);
 
-  private:
-    std::shared_ptr<Object> DictLookup(std::shared_ptr<Object> name);
-
-  private:
-    std::stack<std::shared_ptr<Object>> m_opStack;
-    std::deque<std::map<std::string, std::shared_ptr<Object>> > m_dictStack;
-    std::map < std::string, std::shared_ptr<Object>>  m_systemDict;
-  };
-}
+private:
+  std::stack<std::shared_ptr<Object>> m_opStack;
+  std::deque<std::map<std::string, std::shared_ptr<Object>>> m_dictStack;
+  std::map<std::string, std::shared_ptr<Object>> m_systemDict;
+  ScriptMode m_mode;
+};
+} // namespace ps

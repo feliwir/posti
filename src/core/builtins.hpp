@@ -5,12 +5,12 @@
 
 namespace ps
 {
-    class Interpreter;
-    class Object;
+class Interpreter;
+class Object;
 
-    class Builtins
-    {
-        public:
-        static std::map<std::string, std::shared_ptr<Object>> CreateDictionary(Interpreter* interpr);
-    };
-}
+class Builtins
+{
+  public:
+    static std::map<std::string, std::shared_ptr<Object>> CreateDictionary(Interpreter *interpr);
+};
+} // namespace ps

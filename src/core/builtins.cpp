@@ -98,8 +98,6 @@ std::map<std::string, std::shared_ptr<ps::Object>> ps::Builtins::CreateDictionar
     s.push(std::make_shared<IntegerObject>(s.size()));
   });
 
-
-
   //ARITHMETIC
   //ADD
   dict["add"] = std::make_shared<OperandObject>([&]() {
@@ -112,7 +110,6 @@ std::map<std::string, std::shared_ptr<ps::Object>> ps::Builtins::CreateDictionar
 	  pushInt(sum);
     }
   });
-
 
   return dict;
 }
