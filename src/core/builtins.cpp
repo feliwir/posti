@@ -16,9 +16,19 @@ std::map<std::string, std::shared_ptr<ps::Object>> ps::Builtins::CreateDictionar
     return result;
   };
 
-  auto getInt = [&s](std::shared_ptr<ps::Object> o)
+  auto popInt = [&pop]()
   {
-    return std::static_pointer_cast<IntegerObject>(o)->GetValue();
+	return std::static_pointer_cast<IntegerObject>(pop())->GetValue();
+  };
+
+  auto pushInt = [&s](int i)
+  {
+	s.push(std::make_shared<IntegerObject>(i));
+  };
+
+  auto castToInt = [](std::shared_ptr<ps::Object> o)
+  {
+	  return std::static_pointer_cast<IntegerObject>(o)->GetValue();
   };
 
   //STACK
@@ -45,7 +55,7 @@ std::map<std::string, std::shared_ptr<ps::Object>> ps::Builtins::CreateDictionar
   //STACK
   //copy
   dict["copy"] = std::make_shared<OperandObject>([&]() {
-    int n = getInt(pop());
+    int n = popInt();
     auto vec = std::vector<std::shared_ptr<ps::Object>>();
     for (int i = 0; i < n; i++)
     	vec.push_back(pop());
@@ -58,7 +68,7 @@ std::map<std::string, std::shared_ptr<ps::Object>> ps::Builtins::CreateDictionar
   //STACK
   //index
   dict["index"] = std::make_shared<OperandObject>([&]() {
-    int n = getInt(pop());
+    int n = popInt();
     auto vec = std::vector<std::shared_ptr<ps::Object>>();
     for (int i = 0; i < n + 1; i++)
     	vec.push_back(pop());
@@ -70,8 +80,8 @@ std::map<std::string, std::shared_ptr<ps::Object>> ps::Builtins::CreateDictionar
   //STACK
   //roll
   dict["roll"] = std::make_shared<OperandObject>([&]() {
-    int j = getInt(pop());
-    int n = getInt(pop());
+    int j = popInt();
+    int n = popInt();
     // ??
   });
 
@@ -98,9 +108,8 @@ std::map<std::string, std::shared_ptr<ps::Object>> ps::Builtins::CreateDictionar
 
     if (a->GetType() == ObjectType::Integer && b->GetType() == ObjectType::Integer)
     {
-      int sum = getInt(a) + getInt(b);
-
-      s.push(std::make_shared<IntegerObject>(sum));
+      int sum = castToInt(a) + castToInt(b);
+	  pushInt(sum);
     }
   });
 
