@@ -8,7 +8,8 @@
 ps::Interpreter::Interpreter(ScriptMode mode)
 {
   m_mode = mode;
-  m_systemDict = Builtins::CreateDictionary(this);
+  Builtins b;
+  m_systemDict = b.CreateDictionary(this);
 
   m_dictStack.push_back(m_systemDict);
 }
