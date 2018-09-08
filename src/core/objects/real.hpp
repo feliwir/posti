@@ -12,6 +12,11 @@ public:
     m_type = ObjectType::Real;
   }
 
+  inline int GetValue()
+  {
+    return m_value;
+  }
+
 private:
   float m_value;
 };

@@ -113,9 +113,22 @@ inline void Builtins::Push<int>(int v)
 }
 
 template<>
+inline void Builtins::Push<float>(float v)
+{
+  auto& s = GetStack();
+  s.push(std::make_shared<RealObject>(v));
+}
+
+template<>
 inline int Builtins::Cast<int>(std::shared_ptr<Object> o)
 {
   return o->Cast<IntegerObject>()->GetValue();
+}
+
+template<>
+inline float Builtins::Cast<float>(std::shared_ptr<Object> o)
+{
+  return o->Cast<RealObject>()->GetValue();
 }
 
 

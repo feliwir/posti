@@ -6,6 +6,15 @@ void ps::Builtins::CreateOperand(std::string_view name, std::function<void()> fu
   m_dict[std::string(name)] = std::make_shared<OperandObject>(func);
 }
 
+struct abs {
+	template <typename T>
+	auto operator()( T&& i )
+		-> decltype( i ) {
+		return std::abs(i);
+	}
+};
+
+
 std::map<std::string, std::shared_ptr<ps::Object>> &ps::Builtins::CreateDictionary(Interpreter *interpr)
 {
   m_interpr = interpr;
@@ -92,12 +101,11 @@ std::map<std::string, std::shared_ptr<ps::Object>> &ps::Builtins::CreateDictiona
     BinaryOp(std::minus<>{});
   });
 
-/*
   //ABS
   CreateOperand("abs", [this]() {
-    UnaryOp(_abs<>{});
+    UnaryOp(abs);
   });
-*/
+
   //NEG
   CreateOperand("neg", [this]() {
     UnaryOp(std::negate<>{});
