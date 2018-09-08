@@ -8,15 +8,23 @@
 ps::Interpreter::Interpreter(ScriptMode mode)
 {
   m_mode = mode;
-  Builtins b;
-  m_systemDict = b.CreateDictionary(this);
+  m_systemDict = m_builtins.CreateDictionary(this);
 
   m_dictStack.push_back(m_systemDict);
 }
 
+void ps::Interpreter::RunFunction(std::shared_ptr<Object> obj)
+{
+  // a builtin function
+  if (obj->GetType() == ObjectType::Operand)
+  {
+    obj->Cast<OperandObject>()->Execute();
+  }
+}
+
 std::shared_ptr<ps::Object> ps::Interpreter::DictLookup(std::shared_ptr<Object> name)
 {
-  auto str = std::static_pointer_cast<NameObject>(name)->GetName();
+  auto str = name->Cast<NameObject>()->GetName();
 
   for (auto rit = m_dictStack.rbegin(); rit != m_dictStack.rend(); ++rit)
   {
@@ -47,6 +55,8 @@ void ps::Interpreter::Load(std::istream &input)
       {
         //lookup in the dictionary
         auto value = DictLookup(obj);
+
+        RunFunction(value);
       }
     }
   }

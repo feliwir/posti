@@ -22,13 +22,13 @@ class Builtins
 
     inline std::shared_ptr<Object> Top()
     {
-      auto s = GetStack();
+      auto& s = GetStack();
       return s.top();
     }
 
     inline std::shared_ptr<Object> Pop()
     {
-      auto s = GetStack();
+      auto& s = GetStack();
       auto result = s.top();
       s.pop();
       return result;
@@ -51,7 +51,7 @@ class Builtins
 
     inline void Push(std::shared_ptr<Object> o)
     {
-      auto s = GetStack();
+      auto& s = GetStack();
       s.push(o);
     }
 
@@ -93,14 +93,14 @@ class Builtins
 template<>
 inline void Builtins::Push<int>(int v)
 {
-  auto s = GetStack();
+  auto& s = GetStack();
   s.push(std::make_shared<IntegerObject>(v));
 }
 
 template<>
 inline int Builtins::Cast<int>(std::shared_ptr<Object> o)
 {
-  return std::static_pointer_cast<IntegerObject>(o)->GetValue();
+  return o->Cast<IntegerObject>()->GetValue();
 }
 
 

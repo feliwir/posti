@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 
 namespace ps
 {
@@ -26,7 +27,7 @@ enum class ObjectType
     String
 };
 
-class Object
+class Object : public std::enable_shared_from_this<Object>
 {
   public:
     inline bool IsExecutable()
@@ -42,6 +43,12 @@ class Object
     inline ObjectType GetType()
     {
         return m_type;
+    }
+
+    template<class T>
+    inline std::shared_ptr<T> Cast()
+    {
+      return std::static_pointer_cast<T>(shared_from_this());
     }
 
   protected:

@@ -8,6 +8,8 @@ void ps::Builtins::CreateOperand(std::string_view name, std::function<void()> fu
 
 std::map<std::string, std::shared_ptr<ps::Object>> &ps::Builtins::CreateDictionary(Interpreter *interpr)
 {
+  m_interpr = interpr;
+
   //STACK
   //POP
   CreateOperand("pop", [this]() {
@@ -72,9 +74,19 @@ std::map<std::string, std::shared_ptr<ps::Object>> &ps::Builtins::CreateDictiona
     ArithmeticOp(std::plus<>{});
   });
 
-  //ADD
+  //SUB
   CreateOperand("sub", [this]() {
     ArithmeticOp(std::minus<>{});
+  });
+
+  //MUL
+  CreateOperand("mul", [this]() {
+    ArithmeticOp(std::multiplies<>{});
+  });
+
+  //DIV
+  CreateOperand("div", [this]() {
+    ArithmeticOp(std::divides<>{});
   });
 
   return m_dict;
