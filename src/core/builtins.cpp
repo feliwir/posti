@@ -47,13 +47,6 @@ std::map<std::string, std::shared_ptr<ps::Object>> &ps::Builtins::CreateDictiona
   //   s.push(vec[n]);
   // });
 
-  // //roll
-  // dict["roll"] = std::make_shared<OperandObject>([&]() {
-  //   int j = popInt();
-  //   int n = popInt();
-  //   // ??
-  // });
-
   //clear
   CreateOperand("clear", [this]() {
     auto s = GetStack();
@@ -69,13 +62,52 @@ std::map<std::string, std::shared_ptr<ps::Object>> &ps::Builtins::CreateDictiona
   //ARITHMETIC
   //ADD
   CreateOperand("add", [this]() {
-    ArithmeticOp(std::plus<>{});
+    BinaryOp(std::plus<>{});
   });
 
-  //ADD
-  CreateOperand("sub", [this]() {
-    ArithmeticOp(std::minus<>{});
+  //DIV
+  CreateOperand("div", [this]() {
+    BinaryOp(std::divides<>{});
   });
+
+  //IDIV
+  CreateOperand("idiv", [this]() {
+    BinaryOp(std::divides<int>{});
+  });
+
+  //MOD
+  CreateOperand("mod", [this]() {
+    BinaryOp(std::modulus<>{});
+  });
+
+  //MUL
+  CreateOperand("mul", [this]() {
+    BinaryOp(std::multiplies<>{});
+  });
+
+  //SUB
+  CreateOperand("sub", [this]() {
+    BinaryOp(std::minus<>{});
+  });
+
+/*
+  //ABS
+  CreateOperand("abs", [this]() {
+    UnaryOp(std::abs<>{});
+  });
+*/
+
+  //NEG
+  CreateOperand("neg", [this]() {
+    UnaryOp(std::negate<>{});
+  });
+
+/*
+  //CEILING
+  CreateOperand("ceiling", [this]() {
+    UnaryOp(std::ceil<>{});
+  });
+ */
 
   return m_dict;
 }

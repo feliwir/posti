@@ -68,7 +68,7 @@ class Builtins
     inline T Cast(std::shared_ptr<Object>);
 
     template<typename F>
-    inline void ArithmeticOp(F op)
+    inline void BinaryOp(F op)
     {
       auto a = Pop();
       auto b = Pop();
@@ -82,6 +82,23 @@ class Builtins
       else
       {
         double av, bv;
+        //TODO: implement double/real
+      }
+    }
+
+    template<typename F>
+    inline void UnaryOp(F op)
+    {
+      auto a = Pop();
+
+      if (a->GetType() == ObjectType::Integer)
+      {
+        int ai = Cast<int>(a);
+        Push(op(ai));
+      }
+      else
+      {
+        double ad;
         //TODO: implement double/real
       }
     }
