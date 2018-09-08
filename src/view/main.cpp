@@ -11,7 +11,6 @@ int main(int argc, char **argv)
   options.add_options()("f,file", "File name", cxxopts::value<std::string>(fileInput));
 
   auto result = options.parse(argc, argv);
-  fileInput = "/home/stephan/Development/Repositories/posti/test/files/path.ps";
 
   if (fileInput.empty())
   {

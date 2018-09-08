@@ -8,6 +8,8 @@ void ps::Builtins::CreateOperand(std::string_view name, std::function<void()> fu
 
 std::map<std::string, std::shared_ptr<ps::Object>> &ps::Builtins::CreateDictionary(Interpreter *interpr)
 {
+  m_interpr = interpr;
+
   //STACK
   //POP
   CreateOperand("pop", [this]() {
@@ -93,10 +95,9 @@ std::map<std::string, std::shared_ptr<ps::Object>> &ps::Builtins::CreateDictiona
 /*
   //ABS
   CreateOperand("abs", [this]() {
-    UnaryOp(std::abs<>{});
+    UnaryOp(_abs<>{});
   });
 */
-
   //NEG
   CreateOperand("neg", [this]() {
     UnaryOp(std::negate<>{});
@@ -105,9 +106,9 @@ std::map<std::string, std::shared_ptr<ps::Object>> &ps::Builtins::CreateDictiona
 /*
   //CEILING
   CreateOperand("ceiling", [this]() {
-    UnaryOp(std::ceil<>{});
+    UnaryOp(std::ceil<>);
   });
- */
+*/
 
   return m_dict;
 }

@@ -4,6 +4,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include "builtins.hpp"
 
 namespace ps
 {
@@ -27,11 +28,13 @@ public:
 
 private:
   std::shared_ptr<Object> DictLookup(std::shared_ptr<Object> name);
+  void RunFunction(std::shared_ptr<Object> func);
 
 private:
   std::stack<std::shared_ptr<Object>> m_opStack;
   std::deque<std::map<std::string, std::shared_ptr<Object>>> m_dictStack;
   std::map<std::string, std::shared_ptr<Object>> m_systemDict;
+  Builtins m_builtins;
   ScriptMode m_mode;
 };
 } // namespace ps

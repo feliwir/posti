@@ -9,6 +9,7 @@ public:
   inline IntegerObject(const int value)
   {
     m_value = value;
+    m_type = ObjectType::Integer;
   }
 
   inline int GetValue()
