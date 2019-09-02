@@ -8,7 +8,7 @@ addons:
 
 script:
   - mkdir build && cd build
-  - cmake -DBUILD_TESTING=ON -DCODE_COVERAGE=ON -G Ninja -DCMAKE_BUILD_TYPE=Debug ..
+  - cmake -DBUILD_TESTING=ON -DCODE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug ..
   - cmake --build .
   - ctest . $(nproc) 
 
