@@ -12,7 +12,7 @@ add_library(pscore STATIC
     renderer.cpp renderer.hpp
     util.hpp)
 
-target_link_libraries(pscore Blend2D::Blend2D)
+target_link_libraries(pscore PRIVATE Blend2D::Blend2D PUBLIC coverage_config)
 set(generated_headers "${CMAKE_CURRENT_BINARY_DIR}/generated_headers")
 set(pscore_export "${generated_headers}/pscore_export.hpp")
 include(GenerateExportHeader)
