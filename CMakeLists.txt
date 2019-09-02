@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 option(BUILD_TESTING "Enable testing" ON)
 option(CODE_COVERAGE "Enable code coverage" OFF)
 
+add_library(coverage_config INTERFACE)
 if(CODE_COVERAGE)
   # Add required flags (GCC & LLVM/Clang)
   target_compile_options(coverage_config INTERFACE
