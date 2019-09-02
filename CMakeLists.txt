@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 option(BUILD_TESTING "Enable testing" ON)
 option(CODE_COVERAGE "Enable code coverage" OFF)
 
-if(CODE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+if(CODE_COVERAGE)
   # Add required flags (GCC & LLVM/Clang)
   target_compile_options(coverage_config INTERFACE
     -O0        # no optimization
@@ -22,7 +22,7 @@ if(CODE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   else()
     target_link_libraries(coverage_config INTERFACE --coverage)
   endif()
-endif(CODE_COVERAGE)
+endif()
 
 if(MSVC)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
