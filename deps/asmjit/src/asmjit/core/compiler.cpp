@@ -1,17 +1,14 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Guard]
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_COMPILER
+#ifndef ASMJIT_NO_COMPILER
 
-// [Dependencies]
 #include "../core/assembler.h"
 #include "../core/compiler.h"
 #include "../core/cpuinfo.h"
@@ -21,6 +18,30 @@
 #include "../core/type.h"
 
 ASMJIT_BEGIN_NAMESPACE
+
+// ============================================================================
+// [asmjit::GlobalConstPoolPass]
+// ============================================================================
+
+class GlobalConstPoolPass : public Pass {
+  ASMJIT_NONCOPYABLE(GlobalConstPoolPass)
+  typedef Pass Base;
+
+  GlobalConstPoolPass() noexcept : Pass("GlobalConstPoolPass") {}
+
+  Error run(Zone* zone, Logger* logger) noexcept override {
+    ASMJIT_UNUSED(zone);
+    ASMJIT_UNUSED(logger);
+
+    // Flush the global constant pool.
+    BaseCompiler* compiler = static_cast<BaseCompiler*>(_cb);
+    if (compiler->_globalConstPool) {
+      compiler->addAfter(compiler->_globalConstPool, compiler->lastNode());
+      compiler->_globalConstPool = nullptr;
+    }
+    return kErrorOk;
+  }
+};
 
 // ============================================================================
 // [asmjit::FuncCallNode - Arg / Ret]
@@ -59,7 +80,7 @@ BaseCompiler::BaseCompiler() noexcept
 BaseCompiler::~BaseCompiler() noexcept {}
 
 // ============================================================================
-// [asmjit::BaseCompiler - Func]
+// [asmjit::BaseCompiler - Function API]
 // ============================================================================
 
 FuncNode* BaseCompiler::newFunc(const FuncSignature& sign) noexcept {
@@ -67,7 +88,7 @@ FuncNode* BaseCompiler::newFunc(const FuncSignature& sign) noexcept {
 
   FuncNode* func = newNodeT<FuncNode>();
   if (ASMJIT_UNLIKELY(!func)) {
-    reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    reportError(DebugUtils::errored(kErrorOutOfMemory));
     return nullptr;
   }
 
@@ -83,7 +104,7 @@ FuncNode* BaseCompiler::newFunc(const FuncSignature& sign) noexcept {
   func->_end = newNodeT<SentinelNode>(SentinelNode::kSentinelFuncEnd);
 
   if (ASMJIT_UNLIKELY(!func->_exitNode || !func->_end)) {
-    reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    reportError(DebugUtils::errored(kErrorOutOfMemory));
     return nullptr;
   }
 
@@ -112,11 +133,11 @@ FuncNode* BaseCompiler::newFunc(const FuncSignature& sign) noexcept {
   if (func->argCount() != 0) {
     func->_args = _allocator.allocT<VirtReg*>(func->argCount() * sizeof(VirtReg*));
     if (ASMJIT_UNLIKELY(!func->_args)) {
-      reportError(DebugUtils::errored(kErrorNoHeapMemory));
+      reportError(DebugUtils::errored(kErrorOutOfMemory));
       return nullptr;
     }
 
-    std::memset(func->_args, 0, func->argCount() * sizeof(VirtReg*));
+    memset(func->_args, 0, func->argCount() * sizeof(VirtReg*));
   }
 
   return func;
@@ -139,7 +160,7 @@ FuncNode* BaseCompiler::addFunc(const FuncSignature& sign) {
   FuncNode* func = newFunc(sign);
 
   if (!func) {
-    reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    reportError(DebugUtils::errored(kErrorOutOfMemory));
     return nullptr;
   }
 
@@ -166,14 +187,25 @@ Error BaseCompiler::endFunc() {
   return kErrorOk;
 }
 
-// ============================================================================
-// [asmjit::BaseCompiler - Ret]
-// ============================================================================
+Error BaseCompiler::setArg(uint32_t argIndex, const BaseReg& r) {
+  FuncNode* func = _func;
+
+  if (ASMJIT_UNLIKELY(!func))
+    return reportError(DebugUtils::errored(kErrorInvalidState));
+
+  if (ASMJIT_UNLIKELY(!isVirtRegValid(r)))
+    return reportError(DebugUtils::errored(kErrorInvalidVirtId));
+
+  VirtReg* vReg = virtRegByReg(r);
+  func->setArg(argIndex, vReg);
+
+  return kErrorOk;
+}
 
 FuncRetNode* BaseCompiler::newRet(const Operand_& o0, const Operand_& o1) noexcept {
   FuncRetNode* node = newNodeT<FuncRetNode>();
   if (!node) {
-    reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    reportError(DebugUtils::errored(kErrorOutOfMemory));
     return nullptr;
   }
 
@@ -195,9 +227,9 @@ FuncRetNode* BaseCompiler::addRet(const Operand_& o0, const Operand_& o1) noexce
 // ============================================================================
 
 FuncCallNode* BaseCompiler::newCall(uint32_t instId, const Operand_& o0, const FuncSignature& sign) noexcept {
-  FuncCallNode* node = newNodeT<FuncCallNode>(instId, 0);
+  FuncCallNode* node = newNodeT<FuncCallNode>(instId, 0u);
   if (ASMJIT_UNLIKELY(!node)) {
-    reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    reportError(DebugUtils::errored(kErrorOutOfMemory));
     return nullptr;
   }
 
@@ -219,11 +251,11 @@ FuncCallNode* BaseCompiler::newCall(uint32_t instId, const Operand_& o0, const F
 
   node->_args = static_cast<Operand*>(_allocator.alloc(nArgs * sizeof(Operand)));
   if (!node->_args) {
-    reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    reportError(DebugUtils::errored(kErrorOutOfMemory));
     return nullptr;
   }
 
-  std::memset(node->_args, 0, nArgs * sizeof(Operand));
+  memset(node->_args, 0, nArgs * sizeof(Operand));
   return node;
 }
 
@@ -237,30 +269,11 @@ FuncCallNode* BaseCompiler::addCall(uint32_t instId, const Operand_& o0, const F
 // [asmjit::BaseCompiler - Vars]
 // ============================================================================
 
-Error BaseCompiler::setArg(uint32_t argIndex, const BaseReg& r) {
-  FuncNode* func = _func;
-
-  if (ASMJIT_UNLIKELY(!func))
-    return reportError(DebugUtils::errored(kErrorInvalidState));
-
-  if (ASMJIT_UNLIKELY(!isVirtRegValid(r)))
-    return reportError(DebugUtils::errored(kErrorInvalidVirtId));
-
-  VirtReg* vReg = virtRegByReg(r);
-  func->setArg(argIndex, vReg);
-
-  return kErrorOk;
-}
-
-// ============================================================================
-// [asmjit::BaseCompiler - Vars]
-// ============================================================================
-
 static void CodeCompiler_assignGenericName(BaseCompiler* self, VirtReg* vReg) {
-  uint32_t index = unsigned(Operand::unpackId(vReg->_id));
+  uint32_t index = unsigned(Operand::virtIdToIndex(vReg->_id));
 
   char buf[64];
-  int size = std::snprintf(buf, ASMJIT_ARRAY_SIZE(buf), "%%%u", unsigned(index));
+  int size = snprintf(buf, ASMJIT_ARRAY_SIZE(buf), "%%%u", unsigned(index));
 
   ASMJIT_ASSERT(size > 0 && size < int(ASMJIT_ARRAY_SIZE(buf)));
   vReg->_name.setData(&self->_dataZone, buf, unsigned(size));
@@ -268,7 +281,7 @@ static void CodeCompiler_assignGenericName(BaseCompiler* self, VirtReg* vReg) {
 
 VirtReg* BaseCompiler::newVirtReg(uint32_t typeId, uint32_t signature, const char* name) noexcept {
   uint32_t index = _vRegArray.size();
-  if (ASMJIT_UNLIKELY(index >= uint32_t(Operand::kPackedIdCount)))
+  if (ASMJIT_UNLIKELY(index >= uint32_t(Operand::kVirtIdCount)))
     return nullptr;
 
   if (_vRegArray.willGrow(&_allocator) != kErrorOk)
@@ -278,13 +291,13 @@ VirtReg* BaseCompiler::newVirtReg(uint32_t typeId, uint32_t signature, const cha
   if (ASMJIT_UNLIKELY(!vReg)) return nullptr;
 
   uint32_t size = Type::sizeOf(typeId);
-  uint32_t alignment = std::min<uint32_t>(size, 64);
+  uint32_t alignment = Support::min<uint32_t>(size, 64);
 
-  vReg = new(vReg) VirtReg(Operand::packId(index), signature, size, alignment, typeId);
+  vReg = new(vReg) VirtReg(Operand::indexToVirtId(index), signature, size, alignment, typeId);
 
-  #ifndef ASMJIT_DISABLE_LOGGING
+  #ifndef ASMJIT_NO_LOGGING
   if (name && name[0] != '\0')
-    vReg->_name.setData(&_dataZone, name, Globals::kNullTerminated);
+    vReg->_name.setData(&_dataZone, name, SIZE_MAX);
   else
     CodeCompiler_assignGenericName(this, vReg);
   #endif
@@ -302,16 +315,16 @@ Error BaseCompiler::_newReg(BaseReg& out, uint32_t typeId, const char* name) {
   VirtReg* vReg = newVirtReg(typeId, regInfo.signature(), name);
   if (ASMJIT_UNLIKELY(!vReg)) {
     out.reset();
-    return reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    return reportError(DebugUtils::errored(kErrorOutOfMemory));
   }
 
   out._initReg(regInfo.signature(), vReg->id());
   return kErrorOk;
 }
 
-Error BaseCompiler::_newReg(BaseReg& out, uint32_t typeId, const char* fmt, std::va_list ap) {
-  StringBuilderTmp<256> sb;
-  sb.appendFormatVA(fmt, ap);
+Error BaseCompiler::_newReg(BaseReg& out, uint32_t typeId, const char* fmt, va_list ap) {
+  StringTmp<256> sb;
+  sb.appendVFormat(fmt, ap);
   return _newReg(out, typeId, sb.data());
 }
 
@@ -383,16 +396,16 @@ Error BaseCompiler::_newReg(BaseReg& out, const BaseReg& ref, const char* name) 
   VirtReg* vReg = newVirtReg(typeId, regInfo.signature(), name);
   if (ASMJIT_UNLIKELY(!vReg)) {
     out.reset();
-    return reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    return reportError(DebugUtils::errored(kErrorOutOfMemory));
   }
 
   out._initReg(regInfo.signature(), vReg->id());
   return kErrorOk;
 }
 
-Error BaseCompiler::_newReg(BaseReg& out, const BaseReg& ref, const char* fmt, std::va_list ap) {
-  StringBuilderTmp<256> sb;
-  sb.appendFormatVA(fmt, ap);
+Error BaseCompiler::_newReg(BaseReg& out, const BaseReg& ref, const char* fmt, va_list ap) {
+  StringTmp<256> sb;
+  sb.appendVFormat(fmt, ap);
   return _newReg(out, ref, sb.data());
 }
 
@@ -400,16 +413,19 @@ Error BaseCompiler::_newStack(BaseMem& out, uint32_t size, uint32_t alignment, c
   if (size == 0)
     return reportError(DebugUtils::errored(kErrorInvalidArgument));
 
-  if (alignment == 0) alignment = 1;
+  if (alignment == 0)
+    alignment = 1;
+
   if (!Support::isPowerOf2(alignment))
     return reportError(DebugUtils::errored(kErrorInvalidArgument));
 
-  if (alignment > 64) alignment = 64;
+  if (alignment > 64)
+    alignment = 64;
 
   VirtReg* vReg = newVirtReg(0, 0, name);
   if (ASMJIT_UNLIKELY(!vReg)) {
     out.reset();
-    return reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    return reportError(DebugUtils::errored(kErrorOutOfMemory));
   }
 
   vReg->_virtSize = size;
@@ -417,7 +433,7 @@ Error BaseCompiler::_newStack(BaseMem& out, uint32_t size, uint32_t alignment, c
   vReg->_alignment = uint8_t(alignment);
 
   // Set the memory operand to GPD/GPQ and its id to VirtReg.
-  out = BaseMem(Globals::Init, _gpRegInfo.type(), vReg->id(), BaseReg::kTypeNone, 0, 0, 0, BaseMem::kSignatureMemRegHomeFlag);
+  out = BaseMem(BaseMem::Decomposed { _gpRegInfo.type(), vReg->id(), BaseReg::kTypeNone, 0, 0, 0, BaseMem::kSignatureMemRegHomeFlag });
   return kErrorOk;
 }
 
@@ -434,7 +450,7 @@ Error BaseCompiler::_newConst(BaseMem& out, uint32_t scope, const void* data, si
   if (!pool) {
     pool = newConstPoolNode();
     if (ASMJIT_UNLIKELY(!pool))
-      return reportError(DebugUtils::errored(kErrorNoHeapMemory));
+      return reportError(DebugUtils::errored(kErrorOutOfMemory));
     *pPool = pool;
   }
 
@@ -444,14 +460,15 @@ Error BaseCompiler::_newConst(BaseMem& out, uint32_t scope, const void* data, si
   if (ASMJIT_UNLIKELY(err))
     return reportError(err);
 
-  out = BaseMem(Globals::Init,
+  out = BaseMem(BaseMem::Decomposed {
     Label::kLabelTag,      // Base type.
     pool->id(),            // Base id.
     0,                     // Index type.
     0,                     // Index id.
     int32_t(off),          // Offset.
     uint32_t(size),        // Size.
-    0);                    // Flags.
+    0                      // Flags.
+  });
   return kErrorOk;
 }
 
@@ -463,13 +480,13 @@ void BaseCompiler::rename(BaseReg& reg, const char* fmt, ...) {
 
   if (fmt && fmt[0] != '\0') {
     char buf[128];
-    std::va_list ap;
+    va_list ap;
 
     va_start(ap, fmt);
-    std::vsnprintf(buf, ASMJIT_ARRAY_SIZE(buf), fmt, ap);
+    vsnprintf(buf, ASMJIT_ARRAY_SIZE(buf), fmt, ap);
     va_end(ap);
 
-    vReg->_name.setData(&_dataZone, buf, Globals::kNullTerminated);
+    vReg->_name.setData(&_dataZone, buf, SIZE_MAX);
   }
   else {
     CodeCompiler_assignGenericName(this, vReg);
@@ -481,7 +498,15 @@ void BaseCompiler::rename(BaseReg& reg, const char* fmt, ...) {
 // ============================================================================
 
 Error BaseCompiler::onAttach(CodeHolder* code) noexcept {
-  return Base::onAttach(code);
+  ASMJIT_PROPAGATE(Base::onAttach(code));
+
+  Error err = addPassT<GlobalConstPoolPass>();
+  if (ASMJIT_UNLIKELY(err)) {
+    onDetach(code);
+    return err;
+  }
+
+  return kErrorOk;
 }
 
 Error BaseCompiler::onDetach(CodeHolder* code) noexcept {
@@ -528,5 +553,4 @@ Error FuncPass::run(Zone* zone, Logger* logger) noexcept {
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
-#endif // !ASMJIT_DISABLE_COMPILER
+#endif // !ASMJIT_NO_COMPILER

@@ -1,22 +1,21 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_RAASSIGNMENT_P_H
 #define _ASMJIT_CORE_RAASSIGNMENT_P_H
 
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_COMPILER
+#ifndef ASMJIT_NO_COMPILER
 
-// [Dependencies]
 #include "../core/radefs_p.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_ra
+//! \cond INTERNAL
+//! \addtogroup asmjit_ra
 //! \{
 
 // ============================================================================
@@ -37,10 +36,6 @@ public:
     kDirty = 1
   };
 
-  // --------------------------------------------------------------------------
-  // [Layout]
-  // --------------------------------------------------------------------------
-
   struct Layout {
     inline void reset() noexcept {
       physIndex.reset();
@@ -57,10 +52,6 @@ public:
     const RAWorkRegs* workRegs;          //!< WorkRegs data (vector).
   };
 
-  // --------------------------------------------------------------------------
-  // [PhysToWorkMap]
-  // --------------------------------------------------------------------------
-
   struct PhysToWorkMap {
     static inline size_t sizeOf(uint32_t count) noexcept {
       return sizeof(PhysToWorkMap) - sizeof(uint32_t) + size_t(count) * sizeof(uint32_t);
@@ -76,17 +67,13 @@ public:
 
     inline void copyFrom(const PhysToWorkMap* other, uint32_t count) noexcept {
       size_t size = sizeOf(count);
-      std::memcpy(this, other, size);
+      memcpy(this, other, size);
     }
 
     RARegMask assigned;                  //!< Assigned registers (each bit represents one physical reg).
     RARegMask dirty;                     //!< Dirty registers (spill slot out of sync or no spill slot).
     uint32_t workIds[1 /* ... */];       //!< PhysReg to WorkReg mapping.
   };
-
-  // --------------------------------------------------------------------------
-  // [WorkToPhysMap]
-  // --------------------------------------------------------------------------
 
   struct WorkToPhysMap {
     static inline size_t sizeOf(uint32_t count) noexcept {
@@ -101,24 +88,28 @@ public:
     inline void copyFrom(const WorkToPhysMap* other, uint32_t count) noexcept {
       size_t size = sizeOf(count);
       if (ASMJIT_LIKELY(size))
-        std::memcpy(this, other, size);
+        memcpy(this, other, size);
     }
 
     uint8_t physIds[1 /* ... */];        //!< WorkReg to PhysReg mapping
   };
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! Physical registers layout.
+  Layout _layout;
+  //! WorkReg to PhysReg mapping.
+  WorkToPhysMap* _workToPhysMap;
+  //! PhysReg to WorkReg mapping and assigned/dirty bits.
+  PhysToWorkMap* _physToWorkMap;
+  //! Optimization to translate PhysRegs to WorkRegs faster.
+  uint32_t* _physToWorkIds[BaseReg::kGroupVirt];
+
+  //! \name Construction & Destruction
+  //! \{
 
   inline RAAssignment() noexcept {
     _layout.reset();
     resetMaps();
   }
-
-  // --------------------------------------------------------------------------
-  // [Init / Reset]
-  // --------------------------------------------------------------------------
 
   inline void initLayout(const RARegCount& physCount, const RAWorkRegs& workRegs) noexcept {
     // Layout must be initialized before data.
@@ -147,9 +138,10 @@ public:
       _physToWorkIds[group] = nullptr;
   }
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Accessors
+  //! \{
 
   inline PhysToWorkMap* physToWorkMap() const noexcept { return _physToWorkMap; }
   inline WorkToPhysMap* workToPhysMap() const noexcept { return _workToPhysMap; }
@@ -184,9 +176,10 @@ public:
     return Support::bitTest(_physToWorkMap->dirty[group], physId);
   }
 
-  // --------------------------------------------------------------------------
-  // [Assignment]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Assignment
+  //! \{
 
   // These are low-level allocation helpers that are used to update the current
   // mappings between physical and virt/work registers and also to update masks
@@ -203,7 +196,7 @@ public:
     _workToPhysMap->physIds[workId] = uint8_t(physId);
     _physToWorkIds[group][physId] = workId;
 
-    uint32_t regMask = Support::mask(physId);
+    uint32_t regMask = Support::bitMask(physId);
     _physToWorkMap->assigned[group] |= regMask;
     _physToWorkMap->dirty[group] |= regMask & Support::bitMaskFromBool<uint32_t>(dirty);
 
@@ -222,8 +215,8 @@ public:
     _physToWorkIds[group][srcPhysId] = kWorkNone;
     _physToWorkIds[group][dstPhysId] = workId;
 
-    uint32_t srcMask = Support::mask(srcPhysId);
-    uint32_t dstMask = Support::mask(dstPhysId);
+    uint32_t srcMask = Support::bitMask(srcPhysId);
+    uint32_t dstMask = Support::bitMask(dstPhysId);
 
     uint32_t dirty = (_physToWorkMap->dirty[group] & srcMask) != 0;
     uint32_t regMask = dstMask | srcMask;
@@ -248,8 +241,8 @@ public:
     _physToWorkIds[group][aPhysId] = bWorkId;
     _physToWorkIds[group][bPhysId] = aWorkId;
 
-    uint32_t aMask = Support::mask(aPhysId);
-    uint32_t bMask = Support::mask(bPhysId);
+    uint32_t aMask = Support::bitMask(aPhysId);
+    uint32_t bMask = Support::bitMask(bPhysId);
 
     uint32_t flipMask = Support::bitMaskFromBool<uint32_t>(
       ((_physToWorkMap->dirty[group] & aMask) != 0) ^
@@ -271,7 +264,7 @@ public:
     _workToPhysMap->physIds[workId] = kPhysNone;
     _physToWorkIds[group][physId] = kWorkNone;
 
-    uint32_t regMask = Support::mask(physId);
+    uint32_t regMask = Support::bitMask(physId);
     _physToWorkMap->assigned[group] &= ~regMask;
     _physToWorkMap->dirty[group] &= ~regMask;
 
@@ -281,31 +274,23 @@ public:
   inline void makeClean(uint32_t group, uint32_t workId, uint32_t physId) noexcept {
     ASMJIT_UNUSED(workId);
 
-    uint32_t regMask = Support::mask(physId);
+    uint32_t regMask = Support::bitMask(physId);
     _physToWorkMap->dirty[group] &= ~regMask;
   }
 
   inline void makeDirty(uint32_t group, uint32_t workId, uint32_t physId) noexcept {
     ASMJIT_UNUSED(workId);
 
-    uint32_t regMask = Support::mask(physId);
+    uint32_t regMask = Support::bitMask(physId);
     _physToWorkMap->dirty[group] |= regMask;
   }
 
-  // --------------------------------------------------------------------------
-  // [Copy / Swap]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  inline void copyFrom(const PhysToWorkMap* physToWorkMap, const WorkToPhysMap* workToPhysMap) noexcept {
-    std::memcpy(_physToWorkMap, physToWorkMap, PhysToWorkMap::sizeOf(_layout.physTotal));
-    std::memcpy(_workToPhysMap, workToPhysMap, WorkToPhysMap::sizeOf(_layout.workCount));
-  }
+  //! \name Utilities
+  //! \{
 
-  inline void copyFrom(const RAAssignment& other) noexcept {
-    copyFrom(other.physToWorkMap(), other.workToPhysMap());
-  }
-
-  inline void swapWith(RAAssignment& other) noexcept {
+  inline void swap(RAAssignment& other) noexcept {
     std::swap(_workToPhysMap, other._workToPhysMap);
     std::swap(_physToWorkMap, other._physToWorkMap);
 
@@ -313,9 +298,14 @@ public:
       std::swap(_physToWorkIds[group], other._physToWorkIds[group]);
   }
 
-  // --------------------------------------------------------------------------
-  // [Equals]
-  // --------------------------------------------------------------------------
+  inline void copyFrom(const PhysToWorkMap* physToWorkMap, const WorkToPhysMap* workToPhysMap) noexcept {
+    memcpy(_physToWorkMap, physToWorkMap, PhysToWorkMap::sizeOf(_layout.physTotal));
+    memcpy(_workToPhysMap, workToPhysMap, WorkToPhysMap::sizeOf(_layout.workCount));
+  }
+
+  inline void copyFrom(const RAAssignment& other) noexcept {
+    copyFrom(other.physToWorkMap(), other.workToPhysMap());
+  }
 
   // Not really useful outside of debugging.
   bool equals(const RAAssignment& other) const noexcept {
@@ -351,10 +341,6 @@ public:
     return true;
   }
 
-  // --------------------------------------------------------------------------
-  // [Verify]
-  // --------------------------------------------------------------------------
-
 #if defined(ASMJIT_BUILD_DEBUG)
   ASMJIT_NOINLINE void verify() noexcept {
     // Verify WorkToPhysMap.
@@ -386,19 +372,13 @@ public:
   inline void verify() noexcept {}
 #endif
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  Layout _layout;                        //!< Physical registers layout.
-  WorkToPhysMap* _workToPhysMap;         //!< WorkReg to PhysReg mapping.
-  PhysToWorkMap* _physToWorkMap;         //!< PhysReg to WorkReg mapping and assigned/dirty bits.
-  uint32_t* _physToWorkIds[BaseReg::kGroupVirt]; //!< Optimization to translate PhysRegs to WorkRegs faster.
+  //! \}
 };
+
 //! \}
+//! \endcond
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
-#endif // !ASMJIT_DISABLE_COMPILER
+#endif // !ASMJIT_NO_COMPILER
 #endif // _ASMJIT_CORE_RAASSIGNMENT_P_H

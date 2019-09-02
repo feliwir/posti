@@ -1,13 +1,11 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
 #include "../core/zone.h"
 #include "../core/zonestack.h"
 
@@ -36,7 +34,7 @@ Error ZoneStackBase::_init(ZoneAllocator* allocator, size_t middleIndex) noexcep
   if (allocator) {
     Block* block = static_cast<Block*>(allocator->alloc(kBlockSize));
     if (ASMJIT_UNLIKELY(!block))
-      return DebugUtils::errored(kErrorNoHeapMemory);
+      return DebugUtils::errored(kErrorOutOfMemory);
 
     block->_link[Globals::kLinkLeft] = nullptr;
     block->_link[Globals::kLinkRight] = nullptr;
@@ -63,7 +61,7 @@ Error ZoneStackBase::_prepareBlock(uint32_t side, size_t initialIndex) noexcept 
 
   Block* block = _allocator->allocT<Block>(kBlockSize);
   if (ASMJIT_UNLIKELY(!block))
-    return DebugUtils::errored(kErrorNoHeapMemory);
+    return DebugUtils::errored(kErrorOutOfMemory);
 
   block->_link[ side] = nullptr;
   block->_link[!side] = prev;
@@ -88,10 +86,10 @@ void ZoneStackBase::_cleanupBlock(uint32_t side, size_t middleIndex) noexcept {
     prev->_link[side] = nullptr;
     _block[side] = prev;
   }
-  else if (_block[!side] == prev && prev->empty()) {
+  else if (_block[!side] == block) {
     // If the container becomes empty center both pointers in the remaining block.
-    prev->_start = (uint8_t*)prev + middleIndex;
-    prev->_end = (uint8_t*)prev + middleIndex;
+    block->_start = (uint8_t*)block + middleIndex;
+    block->_end = (uint8_t*)block + middleIndex;
   }
 }
 
@@ -99,7 +97,7 @@ void ZoneStackBase::_cleanupBlock(uint32_t side, size_t middleIndex) noexcept {
 // [asmjit::ZoneStack - Unit]
 // ============================================================================
 
-#if defined(ASMJIT_BUILD_TEST)
+#if defined(ASMJIT_TEST)
 template<typename T>
 static void test_zone_stack(ZoneAllocator* allocator, const char* typeName) {
   ZoneStack<T> stack;
@@ -171,7 +169,7 @@ static void test_zone_stack(ZoneAllocator* allocator, const char* typeName) {
   EXPECT(stack.empty());
 }
 
-UNIT(asmjit_core_zone_stack) {
+UNIT(asmjit_zone_stack) {
   Zone zone(8096 - Zone::kBlockOverhead);
   ZoneAllocator allocator(&zone);
 

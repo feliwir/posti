@@ -1,14 +1,12 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Dependencies]
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <setjmp.h>
 
 #include "./asmjit.h"
 
@@ -19,7 +17,7 @@ typedef void (*SumIntsFunc)(int* dst, const int* a, const int* b);
 
 // This function works with both x86::Assembler and x86::Builder. It shows how
 // `x86::Emitter` can be used to make your code more generic.
-static void makeRawFunc(x86::Emitter* emitter) {
+static void makeRawFunc(x86::Emitter* emitter) noexcept {
   // Decide which registers will be mapped to function arguments. Try changing
   // registers of `dst`, `src_a`, and `src_b` and see what happens in function's
   // prolog and epilog.
@@ -40,7 +38,7 @@ static void makeRawFunc(x86::Emitter* emitter) {
   frame.init(func);
 
   // Make XMM0 and XMM1 dirty. VEC group includes XMM|YMM|ZMM registers.
-  frame.setDirtyRegs(x86::Reg::kGroupVec, Support::mask(0, 1));
+  frame.addDirtyRegs(x86::xmm0, x86::xmm1);
 
   FuncArgsAssignment args(&func);         // Create arguments assignment context.
   args.assignAll(dst, src_a, src_b);      // Assign our registers to arguments.
@@ -53,6 +51,7 @@ static void makeRawFunc(x86::Emitter* emitter) {
 
   emitter->movdqu(vec0, x86::ptr(src_a)); // Load 4 ints from [src_a] to XMM0.
   emitter->movdqu(vec1, x86::ptr(src_b)); // Load 4 ints from [src_b] to XMM1.
+
   emitter->paddd(vec0, vec1);             // Add 4 ints in XMM1 to XMM0.
   emitter->movdqu(x86::ptr(dst), vec0);   // Store the result to [dst].
 
@@ -61,7 +60,7 @@ static void makeRawFunc(x86::Emitter* emitter) {
 }
 
 // This function works with x86::Compiler, provided for comparison.
-static void makeCompiledFunc(x86::Compiler* cc) {
+static void makeCompiledFunc(x86::Compiler* cc) noexcept {
   x86::Gp dst   = cc->newIntPtr();
   x86::Gp src_a = cc->newIntPtr();
   x86::Gp src_b = cc->newIntPtr();
@@ -81,13 +80,12 @@ static void makeCompiledFunc(x86::Compiler* cc) {
   cc->endFunc();
 }
 
-static int testFunc(uint32_t emitterType) {
-  JitRuntime rt;                          // Create JIT Runtime
-  FileLogger logger(stdout);              // Create logger that logs to stdout.
+static uint32_t testFunc(JitRuntime& rt, uint32_t emitterType) noexcept {
+  FileLogger logger(stdout);
 
-  CodeHolder code;                        // Create a CodeHolder.
-  code.init(rt.codeInfo());               // Initialize it to match `rt`.
-  code.setLogger(&logger);                // Attach logger to the code.
+  CodeHolder code;
+  code.init(rt.codeInfo());
+  code.setLogger(&logger);
 
   Error err = kErrorOk;
   switch (emitterType) {
@@ -112,7 +110,6 @@ static int testFunc(uint32_t emitterType) {
     }
 
     case BaseEmitter::kTypeCompiler: {
-      // Create the function by using x86::Builder.
       printf("Using x86::Compiler:\n");
       x86::Compiler cc(&code);
       makeCompiledFunc(&cc);
@@ -149,7 +146,20 @@ static int testFunc(uint32_t emitterType) {
 }
 
 int main(int argc, char* argv[]) {
-  return testFunc(BaseEmitter::kTypeAssembler) |
-         testFunc(BaseEmitter::kTypeBuilder)   |
-         testFunc(BaseEmitter::kTypeCompiler)  ;
+  ASMJIT_UNUSED(argc);
+  ASMJIT_UNUSED(argv);
+
+  unsigned nFailed = 0;
+  JitRuntime rt;
+
+  nFailed += testFunc(rt, BaseEmitter::kTypeAssembler);
+  nFailed += testFunc(rt, BaseEmitter::kTypeBuilder);
+  nFailed += testFunc(rt, BaseEmitter::kTypeCompiler);
+
+  if (!nFailed)
+    printf("[PASSED] All tests passed\n");
+  else
+    printf("[FAILED] %u %s failed\n", nFailed, nFailed == 1 ? "test" : "tests");
+
+  return nFailed ? 1 : 0;
 }

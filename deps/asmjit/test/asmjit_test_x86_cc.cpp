@@ -1,14 +1,13 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Dependencies]
-#include <cstring>
-#include <cstdio>
-#include <cstdlib>
 #include <setjmp.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "./asmjit.h"
 #include "./asmjit_test_misc.h"
@@ -21,13 +20,13 @@ using namespace asmjit;
 
 class CmdLine {
 public:
-  CmdLine(int argc, const char* const* argv)
+  CmdLine(int argc, const char* const* argv) noexcept
     : _argc(argc),
       _argv(argv) {}
 
-  bool hasArg(const char* arg) {
+  bool hasArg(const char* arg) noexcept {
     for (int i = 1; i < _argc; i++)
-      if (std::strcmp(_argv[i], arg) == 0)
+      if (strcmp(_argv[i], arg) == 0)
         return true;
     return false;
   }
@@ -46,11 +45,11 @@ public:
   virtual void handleError(Error err, const char* message, BaseEmitter* origin) {
     ASMJIT_UNUSED(origin);
     _err = err;
-    _message.setString(message);
+    _message.assignString(message);
   }
 
   Error _err;
-  StringBuilder _message;
+  String _message;
 };
 
 // ============================================================================
@@ -60,15 +59,15 @@ public:
 //! Base test interface for testing `x86::Compiler`.
 class X86Test {
 public:
-  X86Test(const char* name = nullptr) { _name.setString(name); }
+  X86Test(const char* name = nullptr) { _name.assignString(name); }
   virtual ~X86Test() {}
 
   inline const char* name() const { return _name.data(); }
 
   virtual void compile(x86::Compiler& c) = 0;
-  virtual bool run(void* func, StringBuilder& result, StringBuilder& expect) = 0;
+  virtual bool run(void* func, String& result, String& expect) = 0;
 
-  StringBuilder _name;
+  String _name;
 };
 
 // ============================================================================
@@ -77,47 +76,39 @@ public:
 
 class X86TestApp {
 public:
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
-
-  X86TestApp()
-    : _zone(8096 - Zone::kBlockOverhead),
-      _allocator(&_zone),
-      _returnCode(0),
-      _binSize(0),
-      _verbose(false),
-      _dumpAsm(false) {}
-
-  ~X86TestApp() {
-    for (X86Test* test : _tests)
-      delete test;
-  }
-
-  // --------------------------------------------------------------------------
-  // [Interface]
-  // --------------------------------------------------------------------------
-
-  Error add(X86Test* test) { return _tests.append(&_allocator, test); }
-  template<class T> inline void addT() { T::add(*this); }
-
-  int handleArgs(int argc, const char* const* argv);
-  void showInfo();
-  int run();
-
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
   Zone _zone;
   ZoneAllocator _allocator;
   ZoneVector<X86Test*> _tests;
 
-  int _returnCode;
-  int _binSize;
+  unsigned _nFailed;
+  size_t _outputSize;
 
   bool _verbose;
   bool _dumpAsm;
+
+  X86TestApp() noexcept
+    : _zone(8096 - Zone::kBlockOverhead),
+      _allocator(&_zone),
+      _nFailed(0),
+      _outputSize(0),
+      _verbose(false),
+      _dumpAsm(false) {}
+
+  ~X86TestApp() noexcept {
+    for (X86Test* test : _tests)
+      delete test;
+  }
+
+  Error add(X86Test* test) noexcept{
+    return _tests.append(&_allocator, test);
+  }
+
+  template<class T>
+  inline void addT() { T::add(*this); }
+
+  int handleArgs(int argc, const char* const* argv);
+  void showInfo();
+  int run();
 };
 
 int X86TestApp::handleArgs(int argc, const char* const* argv) {
@@ -130,15 +121,18 @@ int X86TestApp::handleArgs(int argc, const char* const* argv) {
 }
 
 void X86TestApp::showInfo() {
-  std::printf("AsmJit::x86::Compiler Test:\n");
-  std::printf("  [%s] Verbose (use --verbose to turn verbose output ON)\n", _verbose ? "x" : " ");
-  std::printf("  [%s] DumpAsm (use --dump-asm to turn assembler dumps ON)\n", _dumpAsm ? "x" : " ");
+  printf("AsmJit Compiler Test-Suite v%u.%u.%u  [Arch=%s]:\n",
+    unsigned((ASMJIT_LIBRARY_VERSION >> 16)       ),
+    unsigned((ASMJIT_LIBRARY_VERSION >>  8) & 0xFF),
+    unsigned((ASMJIT_LIBRARY_VERSION      ) & 0xFF),
+    sizeof(void*) == 8 ? "X64" : "X86");
+  printf("  [%s] Verbose (use --verbose to turn verbose output ON)\n", _verbose ? "x" : " ");
+  printf("  [%s] DumpAsm (use --dump-asm to turn assembler dumps ON)\n", _dumpAsm ? "x" : " ");
+  printf("\n");
 }
 
 int X86TestApp::run() {
-  std::FILE* file = stdout;
-
-  #ifndef ASMJIT_DISABLE_LOGGING
+  #ifndef ASMJIT_NO_LOGGING
   uint32_t kFormatFlags = FormatOptions::kFlagMachineCode   |
                           FormatOptions::kFlagExplainImms   |
                           FormatOptions::kFlagRegCasts      |
@@ -146,7 +140,7 @@ int X86TestApp::run() {
                           FormatOptions::kFlagDebugPasses   |
                           FormatOptions::kFlagDebugRA       ;
 
-  FileLogger fileLogger(file);
+  FileLogger fileLogger(stdout);
   fileLogger.addFlags(kFormatFlags);
 
   StringLogger stringLogger;
@@ -161,7 +155,7 @@ int X86TestApp::run() {
     code.init(runtime.codeInfo());
     code.setErrorHandler(&errorHandler);
 
-    #ifndef ASMJIT_DISABLE_LOGGING
+    #ifndef ASMJIT_NO_LOGGING
     if (_verbose) {
       code.setLogger(&fileLogger);
     }
@@ -171,10 +165,10 @@ int X86TestApp::run() {
     }
     #endif
 
-    std::fprintf(file, "[Test] %s", test->name());
+    printf("[Test] %s", test->name());
 
-    #ifndef ASMJIT_DISABLE_LOGGING
-    if (_verbose) std::fprintf(file, "\n");
+    #ifndef ASMJIT_NO_LOGGING
+    if (_verbose) printf("\n");
     #endif
 
     x86::Compiler cc(&code);
@@ -185,13 +179,13 @@ int X86TestApp::run() {
       err = cc.finalize();
     void* func;
 
-    #ifndef ASMJIT_DISABLE_LOGGING
+    #ifndef ASMJIT_NO_LOGGING
     if (_dumpAsm) {
-      if (!_verbose) std::fprintf(file, "\n");
+      if (!_verbose) printf("\n");
 
-      StringBuilder sb;
+      String sb;
       cc.dump(sb, kFormatFlags);
-      std::fprintf(file, "%s", sb.data());
+      printf("%s", sb.data());
     }
     #endif
 
@@ -199,51 +193,58 @@ int X86TestApp::run() {
       err = runtime.add(&func, &code);
 
     if (_verbose)
-      std::fflush(file);
+      fflush(stdout);
 
     if (err == kErrorOk) {
-      StringBuilderTmp<128> result;
-      StringBuilderTmp<128> expect;
+      _outputSize += code.codeSize();
+
+      StringTmp<128> result;
+      StringTmp<128> expect;
 
       if (test->run(func, result, expect)) {
-        if (!_verbose) std::fprintf(file, " [OK]\n");
+        if (!_verbose) printf(" [OK]\n");
       }
       else {
-        if (!_verbose) std::fprintf(file, " [FAILED]\n");
+        if (!_verbose) printf(" [FAILED]\n");
 
-        #ifndef ASMJIT_DISABLE_LOGGING
-        if (!_verbose) std::fprintf(file, "%s", stringLogger.data());
+        #ifndef ASMJIT_NO_LOGGING
+        if (!_verbose) printf("%s", stringLogger.data());
         #endif
 
-        std::fprintf(file, "[Status]\n");
-        std::fprintf(file, "  Returned: %s\n", result.data());
-        std::fprintf(file, "  Expected: %s\n", expect.data());
+        printf("[Status]\n");
+        printf("  Returned: %s\n", result.data());
+        printf("  Expected: %s\n", expect.data());
 
-        _returnCode = 1;
+        _nFailed++;
       }
+
+      if (_dumpAsm)
+        printf("\n");
 
       runtime.release(func);
     }
     else {
-      if (!_verbose) std::fprintf(file, " [FAILED]\n");
+      if (!_verbose) printf(" [FAILED]\n");
 
-      #ifndef ASMJIT_DISABLE_LOGGING
-      if (!_verbose) std::fprintf(file, "%s", stringLogger.data());
+      #ifndef ASMJIT_NO_LOGGING
+      if (!_verbose) printf("%s", stringLogger.data());
       #endif
 
-      std::fprintf(file, "[Status]\n");
-      std::fprintf(file, "  ERROR 0x%08X: %s\n", unsigned(err), errorHandler._message.data());
+      printf("[Status]\n");
+      printf("  ERROR 0x%08X: %s\n", unsigned(err), errorHandler._message.data());
 
-      _returnCode = 1;
+      _nFailed++;
     }
-
-    std::fflush(file);
   }
 
-  std::fprintf(file, "\n");
-  std::fflush(file);
+  if (_nFailed == 0)
+    printf("\n[PASSED] All %u tests passed\n", unsigned(_tests.size()));
+  else
+    printf("\n[FAILED] %u %s of %u failed\n", _nFailed, _nFailed == 1 ? "test" : "tests", unsigned(_tests.size()));
 
-  return _returnCode;
+  printf("  OutputSize=%zu\n", _outputSize);
+
+  return _nFailed == 0 ? 0 : 1;
 }
 
 // ============================================================================
@@ -256,7 +257,7 @@ public:
     : _argCount(argCount),
       _alignment(alignment),
       _preserveFP(preserveFP) {
-    _name.setFormat("AlignBase {NumArgs=%u Alignment=%u PreserveFP=%c}", argCount, alignment, preserveFP ? 'Y' : 'N');
+    _name.assignFormat("AlignBase {NumArgs=%u Alignment=%u PreserveFP=%c}", argCount, alignment, preserveFP ? 'Y' : 'N');
   }
 
   static void add(X86TestApp& app) {
@@ -310,24 +311,26 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
-    typedef int (*Func0)();
-    typedef int (*Func1)(int);
-    typedef int (*Func2)(int, int);
-    typedef int (*Func3)(int, int, int);
-    typedef int (*Func4)(int, int, int, int);
-    typedef int (*Func5)(int, int, int, int, int);
-    typedef int (*Func6)(int, int, int, int, int, int);
-    typedef int (*Func7)(int, int, int, int, int, int, int);
-    typedef int (*Func8)(int, int, int, int, int, int, int, int);
-    typedef int (*Func9)(int, int, int, int, int, int, int, int, int);
-    typedef int (*Func10)(int, int, int, int, int, int, int, int, int, int);
-    typedef int (*Func11)(int, int, int, int, int, int, int, int, int, int, int);
-    typedef int (*Func12)(int, int, int, int, int, int, int, int, int, int, int, int);
-    typedef int (*Func13)(int, int, int, int, int, int, int, int, int, int, int, int, int);
-    typedef int (*Func14)(int, int, int, int, int, int, int, int, int, int, int, int, int, int);
-    typedef int (*Func15)(int, int, int, int, int, int, int, int, int, int, int, int, int, int, int);
-    typedef int (*Func16)(int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int);
+  virtual bool run(void* _func, String& result, String& expect) {
+    typedef unsigned int U;
+
+    typedef U (*Func0)();
+    typedef U (*Func1)(U);
+    typedef U (*Func2)(U, U);
+    typedef U (*Func3)(U, U, U);
+    typedef U (*Func4)(U, U, U, U);
+    typedef U (*Func5)(U, U, U, U, U);
+    typedef U (*Func6)(U, U, U, U, U, U);
+    typedef U (*Func7)(U, U, U, U, U, U, U);
+    typedef U (*Func8)(U, U, U, U, U, U, U, U);
+    typedef U (*Func9)(U, U, U, U, U, U, U, U, U);
+    typedef U (*Func10)(U, U, U, U, U, U, U, U, U, U);
+    typedef U (*Func11)(U, U, U, U, U, U, U, U, U, U, U);
+    typedef U (*Func12)(U, U, U, U, U, U, U, U, U, U, U, U);
+    typedef U (*Func13)(U, U, U, U, U, U, U, U, U, U, U, U, U);
+    typedef U (*Func14)(U, U, U, U, U, U, U, U, U, U, U, U, U, U);
+    typedef U (*Func15)(U, U, U, U, U, U, U, U, U, U, U, U, U, U, U);
+    typedef U (*Func16)(U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U);
 
     unsigned int resultRet = 0;
     unsigned int expectRet = 0;
@@ -403,8 +406,8 @@ public:
         break;
     }
 
-    result.setFormat("ret={%u, %u}", resultRet >> 28, resultRet & 0x0FFFFFFFu);
-    expect.setFormat("ret={%u, %u}", expectRet >> 28, expectRet & 0x0FFFFFFFu);
+    result.assignFormat("ret={%u, %u}", resultRet >> 28, resultRet & 0x0FFFFFFFu);
+    expect.assignFormat("ret={%u, %u}", expectRet >> 28, expectRet & 0x0FFFFFFFu);
 
     return resultRet == expectRet;
   }
@@ -431,7 +434,10 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
+    ASMJIT_UNUSED(result);
+    ASMJIT_UNUSED(expect);
+
     typedef void(*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
@@ -459,7 +465,10 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
+    ASMJIT_UNUSED(result);
+    ASMJIT_UNUSED(expect);
+
     typedef void (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
@@ -489,7 +498,7 @@ public:
     Label LEnd = cc.newLabel();
 
     x86::Gp dst = cc.newIntPtr("dst");
-    x86::Gp val = cc.newIntPtr("val");
+    x86::Gp val = cc.newInt32("val");
 
     cc.setArg(0, dst);
     cc.setArg(1, val);
@@ -517,7 +526,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void(*Func)(int*, int);
     Func func = ptr_as_func<Func>(_func);
 
@@ -527,10 +536,10 @@ public:
     for (int i = 0; i < 5; i++)
       func(&arr[i], i);
 
-    result.setFormat("ret={%d, %d, %d, %d, %d}", arr[0], arr[1], arr[2], arr[3], arr[4]);
-    expect.setFormat("ret={%d, %d, %d, %d, %d}", exp[0], exp[1], exp[2], exp[3], exp[4]);
+    result.assignFormat("ret={%d, %d, %d, %d, %d}", arr[0], arr[1], arr[2], arr[3], arr[4]);
+    expect.assignFormat("ret={%d, %d, %d, %d, %d}", exp[0], exp[1], exp[2], exp[3], exp[4]);
 
-    return true;
+    return result == expect;
   }
 };
 
@@ -565,7 +574,10 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
+    ASMJIT_UNUSED(result);
+    ASMJIT_UNUSED(expect);
+
     typedef void (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
@@ -600,7 +612,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(void);
 
     Func func = ptr_as_func<Func>(_func);
@@ -608,8 +620,8 @@ public:
     int resultRet = func();
     int expectRet = 0;
 
-    result.setFormat("ret={%d}", resultRet);
-    expect.setFormat("ret={%d}", expectRet);
+    result.assignFormat("ret={%d}", resultRet);
+    expect.assignFormat("ret={%d}", expectRet);
 
     return resultRet == expectRet;
   }
@@ -665,7 +677,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
@@ -712,7 +724,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
@@ -762,15 +774,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func();
     int expectRet = 1 + 2 + 3 + 4;
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -829,7 +841,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(int*, int*);
     Func func = ptr_as_func<Func>(_func);
 
@@ -841,8 +853,8 @@ public:
 
     func(&resultX, &resultY);
 
-    result.setFormat("ret={x=%d, y=%d}", resultX, resultY);
-    expect.setFormat("ret={x=%d, y=%d}", expectX, expectY);
+    result.assignFormat("ret={x=%d, y=%d}", resultX, resultY);
+    expect.assignFormat("ret={x=%d, y=%d}", expectX, expectY);
 
     return resultX == expectX && resultY == expectY;
   }
@@ -861,7 +873,7 @@ public:
   }
 
   virtual void compile(x86::Compiler& cc) {
-    cc.addFunc(FuncSignatureT<void, int*>(CallConv::kIdHost));
+    cc.addFunc(FuncSignatureT<void, uint32_t*>(CallConv::kIdHost));
 
     x86::Gp a = cc.newIntPtr("a");
     x86::Gp v[32];
@@ -881,18 +893,18 @@ public:
 
     cc.dec(x);
     cc.jnz(L);
-    for (i = 0; i < ASMJIT_ARRAY_SIZE(v); i++) cc.mov(x86::dword_ptr(a, i * 4), v[i]);
+    for (i = 0; i < ASMJIT_ARRAY_SIZE(v); i++) cc.mov(x86::dword_ptr(a, int(i * 4)), v[i]);
 
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
-    typedef void (*Func)(int*);
+  virtual bool run(void* _func, String& result, String& expect) {
+    typedef void (*Func)(uint32_t*);
     Func func = ptr_as_func<Func>(_func);
 
-    int i;
-    int resultBuf[32];
-    int expectBuf[32];
+    uint32_t i;
+    uint32_t resultBuf[32];
+    uint32_t expectBuf[32];
 
     for (i = 0; i < ASMJIT_ARRAY_SIZE(resultBuf); i++)
       expectBuf[i] = i * 32;
@@ -904,8 +916,8 @@ public:
         expect.appendChar(',');
       }
 
-      result.appendFormat("%d", resultBuf[i]);
-      expect.appendFormat("%d", expectBuf[i]);
+      result.appendFormat("%u", resultBuf[i]);
+      expect.appendFormat("%u", expectBuf[i]);
     }
 
     return result == expect;
@@ -946,7 +958,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(int*, int*, int, int);
     Func func = ptr_as_func<Func>(_func);
 
@@ -961,8 +973,8 @@ public:
 
     func(&resultHi, &resultLo, v0, v1);
 
-    result.setFormat("hi=%d, lo=%d", resultHi, resultLo);
-    expect.setFormat("hi=%d, lo=%d", expectHi, expectLo);
+    result.assignFormat("hi=%d, lo=%d", resultHi, resultLo);
+    expect.assignFormat("hi=%d, lo=%d", expectHi, expectLo);
 
     return resultHi == expectHi && resultLo == expectLo;
   }
@@ -1005,7 +1017,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(int*, const int*);
     Func func = ptr_as_func<Func>(_func);
 
@@ -1015,8 +1027,8 @@ public:
 
     func(resultRet, src);
 
-    result.setFormat("ret={%d, %d}", resultRet[0], resultRet[1]);
-    expect.setFormat("ret={%d, %d}", expectRet[0], expectRet[1]);
+    result.assignFormat("ret={%d, %d}", resultRet[0], resultRet[1]);
+    expect.assignFormat("ret={%d, %d}", expectRet[0], expectRet[1]);
 
     return resultRet[0] == expectRet[0] && resultRet[1] == expectRet[1];
   }
@@ -1051,7 +1063,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int);
     Func func = ptr_as_func<Func>(_func);
 
@@ -1061,8 +1073,8 @@ public:
     int resultRet = func(v0, v1);
     int expectRet = 2999 / 245;
 
-    result.setFormat("result=%d", resultRet);
-    expect.setFormat("result=%d", expectRet);
+    result.assignFormat("result=%d", resultRet);
+    expect.assignFormat("result=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -1097,7 +1109,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(int, int, char*);
     Func func = ptr_as_func<Func>(_func);
 
@@ -1109,8 +1121,8 @@ public:
     func(1, 0, &resultBuf[2]); // We are expecting 0 (1 != 0).
     func(1, 1, &resultBuf[3]); // We are expecting 1 (1 == 1).
 
-    result.setFormat("out={%d, %d, %d, %d}", resultBuf[0], resultBuf[1], resultBuf[2], resultBuf[3]);
-    expect.setFormat("out={%d, %d, %d, %d}", expectBuf[0], expectBuf[1], expectBuf[2], expectBuf[3]);
+    result.assignFormat("out={%d, %d, %d, %d}", resultBuf[0], resultBuf[1], resultBuf[2], resultBuf[3]);
+    expect.assignFormat("out={%d, %d, %d, %d}", expectBuf[0], expectBuf[1], expectBuf[2], expectBuf[3]);
 
     return resultBuf[0] == expectBuf[0] &&
            resultBuf[1] == expectBuf[1] &&
@@ -1151,7 +1163,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(int*, int, int, int);
     Func func = ptr_as_func<Func>(_func);
 
@@ -1162,8 +1174,8 @@ public:
 
     func(&resultRet, v0, 16, 8);
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -1173,14 +1185,14 @@ public:
 // [X86Test_AllocGpbLo]
 // ============================================================================
 
-class X86Test_AllocGpbLo : public X86Test {
+class X86Test_AllocGpbLo1 : public X86Test {
 public:
-  X86Test_AllocGpbLo() : X86Test("AllocGpbLo") {}
+  X86Test_AllocGpbLo1() : X86Test("AllocGpbLo1") {}
 
   enum { kCount = 32 };
 
   static void add(X86TestApp& app) {
-    app.add(new X86Test_AllocGpbLo());
+    app.add(new X86Test_AllocGpbLo1());
   }
 
   virtual void compile(x86::Compiler& cc) {
@@ -1200,7 +1212,7 @@ public:
 
     // Init pseudo-regs with values from our array.
     for (i = 0; i < kCount; i++) {
-      cc.mov(x[i], x86::dword_ptr(rPtr, i * 4));
+      cc.mov(x[i], x86::dword_ptr(rPtr, int(i * 4)));
     }
 
     for (i = 2; i < kCount; i++) {
@@ -1222,12 +1234,11 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
-    typedef int (*Func)(uint32_t*);
+  virtual bool run(void* _func, String& result, String& expect) {
+    typedef uint32_t (*Func)(uint32_t*);
     Func func = ptr_as_func<Func>(_func);
 
-    unsigned int i;
-
+    uint32_t i;
     uint32_t buf[kCount];
     uint32_t resultRet;
     uint32_t expectRet;
@@ -1253,8 +1264,44 @@ public:
     }
     resultRet = func(buf);
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
+
+    return resultRet == expectRet;
+  }
+};
+
+// ============================================================================
+// [X86Test_AllocGpbLo2]
+// ============================================================================
+
+class X86Test_AllocGpbLo2 : public X86Test {
+public:
+  X86Test_AllocGpbLo2() : X86Test("AllocGpbLo2") {}
+
+  static void add(X86TestApp& app) {
+    app.add(new X86Test_AllocGpbLo2());
+  }
+
+  virtual void compile(x86::Compiler& cc) {
+    cc.addFunc(FuncSignatureT<uint32_t, uint32_t>(CallConv::kIdHost));
+
+    x86::Gp v = cc.newUInt32("v");
+    cc.setArg(0, v);
+    cc.mov(v.r8(), 0xFF);
+    cc.ret(v);
+    cc.endFunc();
+  }
+
+  virtual bool run(void* _func, String& result, String& expect) {
+    typedef uint32_t (*Func)(uint32_t);
+    Func func = ptr_as_func<Func>(_func);
+
+    uint32_t resultRet = func(0x12345678u);
+    uint32_t expectRet = 0x123456FFu;
+
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -1287,7 +1334,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(void*, void*, size_t);
     Func func = ptr_as_func<Func>(_func);
 
@@ -1295,8 +1342,8 @@ public:
     char src[20] = "Hello AsmJit!";
     func(dst, src, strlen(src) + 1);
 
-    result.setFormat("ret=\"%s\"", dst);
-    expect.setFormat("ret=\"%s\"", src);
+    result.assignFormat("ret=\"%s\"", dst);
+    expect.assignFormat("ret=\"%s\"", src);
 
     return result == expect;
   }
@@ -1340,7 +1387,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int);
     Func func = ptr_as_func<Func>(_func);
 
@@ -1348,9 +1395,9 @@ public:
     int b = func(1, 0);
 
     result.appendFormat("ret={%d, %d}", a, b);
-    result.appendFormat("ret={%d, %d}", 1, 2);
+    expect.appendFormat("ret={%d, %d}", 1, 2);
 
-    return a == 1 && b == 2;
+    return result == expect;
   }
 };
 
@@ -1401,7 +1448,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int);
     Func func = ptr_as_func<Func>(_func);
 
@@ -1409,9 +1456,9 @@ public:
     int b = func(1, 0);
 
     result.appendFormat("ret={%d, %d}", a, b);
-    result.appendFormat("ret={%d, %d}", 1, 2);
+    expect.appendFormat("ret={%d, %d}", 1, 2);
 
-    return a == 1 && b == 2;
+    return result == expect;
   }
 };
 
@@ -1462,7 +1509,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int);
     Func func = ptr_as_func<Func>(_func);
 
@@ -1470,9 +1517,9 @@ public:
     int b = func(1, 0);
 
     result.appendFormat("ret={%d, %d}", a, b);
-    result.appendFormat("ret={%d, %d}", 1, 2);
+    expect.appendFormat("ret={%d, %d}", 1, 2);
 
-    return a == 1 && b == 2;
+    return result == expect;
   }
 };
 
@@ -1528,7 +1575,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int);
     Func func = ptr_as_func<Func>(_func);
 
@@ -1536,9 +1583,9 @@ public:
     int b = func(1, 0);
 
     result.appendFormat("ret={%d, %d}", a, b);
-    result.appendFormat("ret={%d, %d}", 1, 2);
+    expect.appendFormat("ret={%d, %d}", 1, 2);
 
-    return a == 1 && b == 2;
+    return result == expect;
   }
 };
 
@@ -1567,17 +1614,17 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(char);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func(-13);
     int expectRet = -13;
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
-    return resultRet == expectRet;
+    return result == expect;
   }
 };
 
@@ -1603,17 +1650,17 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int, int);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func(42, 155, 199);
     int expectRet = 199;
 
-    result.setFormat("ret={%d}", resultRet);
-    expect.setFormat("ret={%d}", expectRet);
+    result.assignFormat("ret={%d}", resultRet);
+    expect.assignFormat("ret={%d}", expectRet);
 
-    return resultRet == expectRet;
+    return result == expect;
   }
 };
 
@@ -1653,7 +1700,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(void*, void*, void*, void*, void*, void*, void*, void*);
     Func func = ptr_as_func<Func>(_func);
 
@@ -1663,11 +1710,11 @@ public:
     func(resultBuf, resultBuf, resultBuf, resultBuf,
          resultBuf, resultBuf, resultBuf, resultBuf);
 
-    result.setFormat("buf={%d, %d, %d, %d, %d, %d, %d, %d, %d}",
+    result.assignFormat("buf={%d, %d, %d, %d, %d, %d, %d, %d, %d}",
       resultBuf[0], resultBuf[1], resultBuf[2], resultBuf[3],
       resultBuf[4], resultBuf[5], resultBuf[6], resultBuf[7],
       resultBuf[8]);
-    expect.setFormat("buf={%d, %d, %d, %d, %d, %d, %d, %d, %d}",
+    expect.assignFormat("buf={%d, %d, %d, %d, %d, %d, %d, %d, %d}",
       expectBuf[0], expectBuf[1], expectBuf[2], expectBuf[3],
       expectBuf[4], expectBuf[5], expectBuf[6], expectBuf[7],
       expectBuf[8]);
@@ -1714,7 +1761,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(float, float, float, float, float, float, float, float*);
     Func func = ptr_as_func<Func>(_func);
 
@@ -1723,8 +1770,8 @@ public:
 
     func(1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, &resultRet);
 
-    result.setFormat("ret={%g}", resultRet);
-    expect.setFormat("ret={%g}", expectRet);
+    result.assignFormat("ret={%g}", resultRet);
+    expect.assignFormat("ret={%g}", expectRet);
 
     return resultRet == expectRet;
   }
@@ -1768,7 +1815,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(double, double, double, double, double, double, double, double*);
     Func func = ptr_as_func<Func>(_func);
 
@@ -1777,8 +1824,8 @@ public:
 
     func(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, &resultRet);
 
-    result.setFormat("ret={%g}", resultRet);
-    expect.setFormat("ret={%g}", expectRet);
+    result.assignFormat("ret={%g}", resultRet);
+    expect.assignFormat("ret={%g}", expectRet);
 
     return resultRet == expectRet;
   }
@@ -1806,15 +1853,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef float (*Func)(float);
     Func func = ptr_as_func<Func>(_func);
 
     float resultRet = func(42.0f);
     float expectRet = 42.0f;
 
-    result.setFormat("ret={%g}", resultRet);
-    expect.setFormat("ret={%g}", expectRet);
+    result.assignFormat("ret={%g}", resultRet);
+    expect.assignFormat("ret={%g}", expectRet);
 
     return resultRet == expectRet;
   }
@@ -1847,15 +1894,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef float (*Func)(float, float);
     Func func = ptr_as_func<Func>(_func);
 
     float resultRet = func(1.0f, 2.0f);
     float expectRet = 1.0f + 2.0f;
 
-    result.setFormat("ret={%g}", resultRet);
-    expect.setFormat("ret={%g}", expectRet);
+    result.assignFormat("ret={%g}", resultRet);
+    expect.assignFormat("ret={%g}", expectRet);
 
     return resultRet == expectRet;
   }
@@ -1883,15 +1930,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef double (*Func)(double);
     Func func = ptr_as_func<Func>(_func);
 
     double resultRet = func(42.0);
     double expectRet = 42.0;
 
-    result.setFormat("ret={%g}", resultRet);
-    expect.setFormat("ret={%g}", expectRet);
+    result.assignFormat("ret={%g}", resultRet);
+    expect.assignFormat("ret={%g}", expectRet);
 
     return resultRet == expectRet;
   }
@@ -1923,15 +1970,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef double (*Func)(double, double);
     Func func = ptr_as_func<Func>(_func);
 
     double resultRet = func(1.0, 2.0);
     double expectRet = 1.0 + 2.0;
 
-    result.setFormat("ret={%g}", resultRet);
-    expect.setFormat("ret={%g}", expectRet);
+    result.assignFormat("ret={%g}", resultRet);
+    expect.assignFormat("ret={%g}", expectRet);
 
     return resultRet == expectRet;
   }
@@ -1991,15 +2038,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func();
     int expectRet = 32640;
 
-    result.setInt(resultRet);
-    expect.setInt(expectRet);
+    result.assignInt(resultRet);
+    expect.assignInt(expectRet);
 
     return resultRet == expectRet;
   }
@@ -2051,7 +2098,7 @@ public:
     cc.endFunc();                                   // End of function.
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(uint32_t*, const uint32_t*, size_t);
     Func func = ptr_as_func<Func>(_func);
 
@@ -2067,8 +2114,8 @@ public:
 
     func(dstBuffer, srcBuffer, kCount);
 
-    result.setString("buf={");
-    expect.setString("buf={");
+    result.assignString("buf={");
+    expect.assignString("buf={");
 
     for (i = 0; i < kCount; i++) {
       if (i != 0) {
@@ -2133,7 +2180,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int, int);
     Func func = ptr_as_func<Func>(_func);
 
@@ -2143,8 +2190,8 @@ public:
     int exp1 = 4 + 5;
     int exp2 = 4 - 5;
 
-    result.setFormat("ret={%d, %d}", ret1, ret2);
-    expect.setFormat("ret={%d, %d}", exp1, exp2);
+    result.assignFormat("ret={%d, %d}", ret1, ret2);
+    expect.assignFormat("ret={%d, %d}", exp1, exp2);
 
     return result == expect;
   }
@@ -2183,7 +2230,7 @@ public:
     asmtest::generateAlphaBlend(cc);
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(void*, const void*, size_t);
     Func func = ptr_as_func<Func>(_func);
 
@@ -2197,8 +2244,8 @@ public:
     uint32_t* dstBuffer = (uint32_t*)Support::alignUp<intptr_t>((intptr_t)_dstBuffer, 16);
     uint32_t* srcBuffer = (uint32_t*)Support::alignUp<intptr_t>((intptr_t)_srcBuffer, 16);
 
-    std::memcpy(dstBuffer, dstConstData, sizeof(dstConstData));
-    std::memcpy(srcBuffer, srcConstData, sizeof(srcConstData));
+    memcpy(dstBuffer, dstConstData, sizeof(dstConstData));
+    memcpy(srcBuffer, srcConstData, sizeof(srcConstData));
 
     uint32_t i;
     uint32_t expBuffer[kCount];
@@ -2209,8 +2256,8 @@ public:
 
     func(dstBuffer, srcBuffer, kCount);
 
-    result.setString("buf={");
-    expect.setString("buf={");
+    result.assignString("buf={");
+    expect.assignString("buf={");
 
     for (i = 0; i < kCount; i++) {
       if (i != 0) {
@@ -2257,10 +2304,7 @@ public:
     cc.shl(v2, 1);
 
     // Call a function.
-    x86::Gp fn = cc.newIntPtr("fn");
-    cc.mov(fn, imm(calledFunc));
-
-    FuncCallNode* call = cc.call(fn, FuncSignatureT<int, int, int, int>(CallConv::kIdHost));
+    FuncCallNode* call = cc.call(imm((void*)calledFunc), FuncSignatureT<int, int, int, int>(CallConv::kIdHost));
     call->setArg(0, v2);
     call->setArg(1, v1);
     call->setArg(2, v0);
@@ -2270,15 +2314,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int, int);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func(3, 2, 1);
     int expectRet = 36;
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -2321,19 +2365,19 @@ public:
     cc.lea(p2, s2);
 
     // Try to corrupt the stack if wrongly allocated.
-    call = cc.call(imm(std::memcpy), FuncSignatureT<void*, void*, void*, size_t>(CallConv::kIdHostCDecl));
+    call = cc.call(imm((void*)memcpy), FuncSignatureT<void*, void*, void*, size_t>(CallConv::kIdHostCDecl));
     call->setArg(0, p1);
     call->setArg(1, imm(token));
     call->setArg(2, imm(kTokenSize));
     call->setRet(0, p1);
 
-    call = cc.call(imm(std::memcpy), FuncSignatureT<void*, void*, void*, size_t>(CallConv::kIdHostCDecl));
+    call = cc.call(imm((void*)memcpy), FuncSignatureT<void*, void*, void*, size_t>(CallConv::kIdHostCDecl));
     call->setArg(0, p2);
     call->setArg(1, imm(token));
     call->setArg(2, imm(kTokenSize));
     call->setRet(0, p2);
 
-    call = cc.call(imm(std::memcmp), FuncSignatureT<int, void*, void*, size_t>(CallConv::kIdHostCDecl));
+    call = cc.call(imm((void*)memcmp), FuncSignatureT<int, void*, void*, size_t>(CallConv::kIdHostCDecl));
     call->setArg(0, p1);
     call->setArg(1, p2);
     call->setArg(2, imm(kTokenSize));
@@ -2354,15 +2398,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func();
     int expectRet = 0; // Must be zero, stack addresses must be different.
 
-    result.setInt(resultRet);
-    expect.setInt(expectRet);
+    result.assignInt(resultRet);
+    expect.assignInt(expectRet);
 
     return resultRet == expectRet;
   }
@@ -2390,10 +2434,9 @@ public:
     cc.setArg(1, y);
     cc.setArg(2, z);
 
-    x86::Gp fn = cc.newIntPtr("fn");
-    cc.mov(fn, imm(calledFunc));
-
-    FuncCallNode* call = cc.call(fn, FuncSignatureT<int, int, int, int>(CallConv::kIdHostStdCall));
+    FuncCallNode* call = cc.call(
+      imm((void*)calledFunc),
+      FuncSignatureT<int, int, int, int>(CallConv::kIdHostStdCall));
     call->setArg(0, x);
     call->setArg(1, y);
     call->setArg(2, z);
@@ -2403,22 +2446,20 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int, int);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func(1, 42, 3);
     int expectRet = calledFunc(1, 42, 3);
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
 
-  // Function that is called inside the generated one. Because this test is
-  // mainly about register arguments, we need to use the fastcall calling
-  // convention when running 32-bit.
+  // STDCALL function that is called inside the generated one.
   static int ASMJIT_STDCALL calledFunc(int a, int b, int c) noexcept {
     return (a + b) * c;
   }
@@ -2438,19 +2479,20 @@ public:
 
   virtual void compile(x86::Compiler& cc) {
     x86::Gp var = cc.newInt32("var");
-    x86::Gp fn = cc.newIntPtr("fn");
 
     cc.addFunc(FuncSignatureT<int, int>(CallConv::kIdHost));
     cc.setArg(0, var);
 
-    cc.mov(fn, imm(calledFunc));
     FuncCallNode* call;
-
-    call = cc.call(fn, FuncSignatureT<int, int>(CallConv::kIdHostFastCall));
+    call = cc.call(
+      imm((void*)calledFunc),
+      FuncSignatureT<int, int>(CallConv::kIdHostFastCall));
     call->setArg(0, var);
     call->setRet(0, var);
 
-    call = cc.call(fn, FuncSignatureT<int, int>(CallConv::kIdHostFastCall));
+    call = cc.call(
+      imm((void*)calledFunc),
+      FuncSignatureT<int, int>(CallConv::kIdHostFastCall));
     call->setArg(0, var);
     call->setRet(0, var);
 
@@ -2458,22 +2500,20 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func(9);
     int expectRet = (9 * 9) * (9 * 9);
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
 
-  // Function that is called inside the generated one. Because this test is
-  // mainly about register arguments, we need to use the fastcall calling
-  // convention when running 32-bit.
+  // FASTCALL function that is called inside the generated one.
   static int ASMJIT_FASTCALL calledFunc(int a) noexcept {
     return a * a;
   }
@@ -2555,7 +2595,7 @@ public:
     }
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef void (*Func)(const void*, const void*, const void*, const void*, void*);
 
     Func func = ptr_as_func<Func>(_func);
@@ -2570,8 +2610,8 @@ public:
 
     func(a, b, c, d, o);
 
-    result.setFormat("ret={%02X %02X %02X %02X %02X %02X %02X %02X}", o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7]);
-    expect.setFormat("ret={%02X %02X %02X %02X %02X %02X %02X %02X}", oExp, oExp, oExp, oExp, oExp, oExp, oExp, oExp);
+    result.assignFormat("ret={%02X %02X %02X %02X %02X %02X %02X %02X}", o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7]);
+    expect.assignFormat("ret={%02X %02X %02X %02X %02X %02X %02X %02X}", oExp, oExp, oExp, oExp, oExp, oExp, oExp, oExp);
 
     return result == expect;
   }
@@ -2597,7 +2637,6 @@ public:
     cc.addFunc(FuncSignatureT<int>(CallConv::kIdHost));
 
     // Prepare.
-    x86::Gp fn = cc.newIntPtr("fn");
     x86::Gp va = cc.newInt32("va");
     x86::Gp vb = cc.newInt32("vb");
     x86::Gp vc = cc.newInt32("vc");
@@ -2609,7 +2648,6 @@ public:
     x86::Gp vi = cc.newInt32("vi");
     x86::Gp vj = cc.newInt32("vj");
 
-    cc.mov(fn, imm(calledFunc));
     cc.mov(va, 0x03);
     cc.mov(vb, 0x12);
     cc.mov(vc, 0xA0);
@@ -2622,7 +2660,9 @@ public:
     cc.mov(vj, 0x1E);
 
     // Call function.
-    FuncCallNode* call = cc.call(fn, FuncSignatureT<int, int, int, int, int, int, int, int, int, int, int>(CallConv::kIdHost));
+    FuncCallNode* call = cc.call(
+      imm((void*)calledFunc),
+      FuncSignatureT<int, int, int, int, int, int, int, int, int, int, int>(CallConv::kIdHost));
     call->setArg(0, va);
     call->setArg(1, vb);
     call->setArg(2, vc);
@@ -2639,15 +2679,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func();
     int expectRet = calledFunc(0x03, 0x12, 0xA0, 0x0B, 0x2F, 0x02, 0x0C, 0x12, 0x18, 0x1E);
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -2673,14 +2713,13 @@ public:
     cc.addFunc(FuncSignatureT<int>(CallConv::kIdHost));
 
     // Prepare.
-    x86::Gp fn = cc.newIntPtr("fn");
     x86::Gp a = cc.newInt32("a");
-
-    cc.mov(fn, imm(calledFunc));
     cc.mov(a, 3);
 
     // Call function.
-    FuncCallNode* call = cc.call(fn, FuncSignatureT<int, int, int, int, int, int, int, int, int, int, int>(CallConv::kIdHost));
+    FuncCallNode* call = cc.call(
+      imm((void*)calledFunc),
+      FuncSignatureT<int, int, int, int, int, int, int, int, int, int, int>(CallConv::kIdHost));
     call->setArg(0, a);
     call->setArg(1, a);
     call->setArg(2, a);
@@ -2697,15 +2736,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func();
     int expectRet = calledFunc(3, 3, 3, 3, 3, 3, 3, 3, 3, 3);
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -2727,13 +2766,13 @@ public:
     cc.addFunc(FuncSignatureT<int>(CallConv::kIdHost));
 
     // Prepare.
-    x86::Gp fn = cc.newIntPtr("fn");
     x86::Gp rv = cc.newInt32("rv");
 
-    cc.mov(fn, imm(X86Test_FuncCallManyArgs::calledFunc));
-
     // Call function.
-    FuncCallNode* call = cc.call(fn, FuncSignatureT<int, int, int, int, int, int, int, int, int, int, int>(CallConv::kIdHost));
+    FuncCallNode* call = cc.call(
+      imm((void*)X86Test_FuncCallManyArgs::calledFunc),
+      FuncSignatureT<int, int, int, int, int, int, int, int, int, int, int>(CallConv::kIdHost));
+
     call->setArg(0, imm(0x03));
     call->setArg(1, imm(0x12));
     call->setArg(2, imm(0xA0));
@@ -2750,15 +2789,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func();
     int expectRet = X86Test_FuncCallManyArgs::calledFunc(0x03, 0x12, 0xA0, 0x0B, 0x2F, 0x02, 0x0C, 0x12, 0x18, 0x1E);
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -2793,13 +2832,13 @@ public:
     cc.addFunc(FuncSignatureT<int>(CallConv::kIdHost));
 
     // Prepare.
-    x86::Gp fn = cc.newIntPtr("fn");
     x86::Gp rv = cc.newInt32("rv");
 
-    cc.mov(fn, imm(calledFunc));
-
     // Call function.
-    FuncCallNode* call = cc.call(fn, FuncSignatureT<int, void*, void*, void*, void*, void*, void*, void*, void*, void*, void*>(CallConv::kIdHost));
+    FuncCallNode* call = cc.call(
+      imm((void*)calledFunc),
+      FuncSignatureT<int, void*, void*, void*, void*, void*, void*, void*, void*, void*, void*>(CallConv::kIdHost));
+
     call->setArg(0, imm(0x01));
     call->setArg(1, imm(0x02));
     call->setArg(2, imm(0x03));
@@ -2816,15 +2855,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func();
     int expectRet = 55;
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -2856,13 +2895,10 @@ public:
     cc.setArg(0, a);
     cc.setArg(1, b);
 
-    // Prepare.
-    x86::Gp fn = cc.newIntPtr("fn");
-    cc.mov(fn, imm(calledFunc));
-
     // Call function.
-    FuncCallNode* call = cc.call(fn, FuncSignatureT<float, float, float>(CallConv::kIdHost));
-
+    FuncCallNode* call = cc.call(
+      imm((void*)calledFunc),
+      FuncSignatureT<float, float, float>(CallConv::kIdHost));
     call->setArg(0, a);
     call->setArg(1, b);
     call->setRet(0, ret);
@@ -2871,15 +2907,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef float (*Func)(float, float);
     Func func = ptr_as_func<Func>(_func);
 
     float resultRet = func(15.5f, 2.0f);
     float expectRet = calledFunc(15.5f, 2.0f);
 
-    result.setFormat("ret=%g", resultRet);
-    expect.setFormat("ret=%g", expectRet);
+    result.assignFormat("ret=%g", resultRet);
+    expect.assignFormat("ret=%g", expectRet);
 
     return resultRet == expectRet;
   }
@@ -2911,11 +2947,9 @@ public:
     cc.setArg(0, a);
     cc.setArg(1, b);
 
-    x86::Gp fn = cc.newIntPtr("fn");
-    cc.mov(fn, imm(calledFunc));
-
-    FuncCallNode* call = cc.call(fn, FuncSignatureT<double, double, double>(CallConv::kIdHost));
-
+    FuncCallNode* call = cc.call(
+      imm((void*)calledFunc),
+      FuncSignatureT<double, double, double>(CallConv::kIdHost));
     call->setArg(0, a);
     call->setArg(1, b);
     call->setRet(0, ret);
@@ -2924,15 +2958,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef double (*Func)(double, double);
     Func func = ptr_as_func<Func>(_func);
 
     double resultRet = func(15.5, 2.0);
     double expectRet = calledFunc(15.5, 2.0);
 
-    result.setFormat("ret=%g", resultRet);
-    expect.setFormat("ret=%g", expectRet);
+    result.assignFormat("ret=%g", resultRet);
+    expect.assignFormat("ret=%g", expectRet);
 
     return resultRet == expectRet;
   }
@@ -2996,7 +3030,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int, int);
     Func func = ptr_as_func<Func>(_func);
 
@@ -3009,8 +3043,8 @@ public:
     int resultMul = func(arg1, arg2, 1);
     int expectMul = calledFuncMul(arg1, arg2);
 
-    result.setFormat("ret={add=%d, mul=%d}", resultAdd, resultMul);
-    expect.setFormat("ret={add=%d, mul=%d}", expectAdd, expectMul);
+    result.assignFormat("ret={add=%d, mul=%d}", resultAdd, resultMul);
+    expect.assignFormat("ret={add=%d, mul=%d}", expectAdd, expectMul);
 
     return (resultAdd == expectAdd) && (resultMul == expectMul);
   }
@@ -3080,7 +3114,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int*);
     Func func = ptr_as_func<Func>(_func);
 
@@ -3089,8 +3123,8 @@ public:
     int resultRet = func(buffer);
     int expectRet = 0;
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -3132,17 +3166,153 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func(5);
     int expectRet = 1 * 2 * 3 * 4 * 5;
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
+  }
+};
+
+// ============================================================================
+// [X86Test_FuncCallVarArg1]
+// ============================================================================
+
+class X86Test_FuncCallVarArg1 : public X86Test {
+public:
+  X86Test_FuncCallVarArg1() : X86Test("FuncCallVarArg1") {}
+
+  static void add(X86TestApp& app) {
+    app.add(new X86Test_FuncCallVarArg1());
+  }
+
+  virtual void compile(x86::Compiler& cc) {
+    cc.addFunc(FuncSignatureT<int, int, int, int, int>(CallConv::kIdHost));
+
+    x86::Gp a0 = cc.newInt32("a0");
+    x86::Gp a1 = cc.newInt32("a1");
+    x86::Gp a2 = cc.newInt32("a2");
+    x86::Gp a3 = cc.newInt32("a3");
+
+    cc.setArg(0, a0);
+    cc.setArg(1, a1);
+    cc.setArg(2, a2);
+    cc.setArg(3, a3);
+
+    // We call `int func(size_t, ...)`
+    //   - The `vaIndex` must be 1 (first argument after size_t).
+    //   - The full signature of varargs (int, int, int, int) must follow.
+    FuncCallNode* call = cc.call(
+      imm((void*)calledFunc),
+      FuncSignatureT<int, size_t, int, int, int, int>(CallConv::kIdHost, 1));
+    call->setArg(0, imm(4));
+    call->setArg(1, a0);
+    call->setArg(2, a1);
+    call->setArg(3, a2);
+    call->setArg(4, a3);
+    call->setRet(0, a0);
+
+    cc.ret(a0);
+    cc.endFunc();
+  }
+
+  virtual bool run(void* _func, String& result, String& expect) {
+    typedef int (*Func)(int, int, int, int);
+    Func func = ptr_as_func<Func>(_func);
+
+    int resultRet = func(1, 2, 3, 4);
+    int expectRet = 1 + 2 + 3 + 4;
+
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
+
+    return resultRet == expectRet;
+  }
+
+  static int calledFunc(size_t n, ...) {
+    int sum = 0;
+    va_list ap;
+    va_start(ap, n);
+    for (size_t i = 0; i < n; i++) {
+      int arg = va_arg(ap, int);
+      sum += arg;
+    }
+    va_end(ap);
+    return sum;
+  }
+};
+
+// ============================================================================
+// [X86Test_FuncCallVarArg2]
+// ============================================================================
+
+class X86Test_FuncCallVarArg2 : public X86Test {
+public:
+  X86Test_FuncCallVarArg2() : X86Test("FuncCallVarArg2") {}
+
+  static void add(X86TestApp& app) {
+    app.add(new X86Test_FuncCallVarArg2());
+  }
+
+  virtual void compile(x86::Compiler& cc) {
+    cc.addFunc(FuncSignatureT<double, double, double, double, double>(CallConv::kIdHost));
+
+    x86::Xmm a0 = cc.newXmmSd("a0");
+    x86::Xmm a1 = cc.newXmmSd("a1");
+    x86::Xmm a2 = cc.newXmmSd("a2");
+    x86::Xmm a3 = cc.newXmmSd("a3");
+
+    cc.setArg(0, a0);
+    cc.setArg(1, a1);
+    cc.setArg(2, a2);
+    cc.setArg(3, a3);
+
+    // We call `double func(size_t, ...)`
+    //   - The `vaIndex` must be 1 (first argument after size_t).
+    //   - The full signature of varargs (double, double, double, double) must follow.
+    FuncCallNode* call = cc.call(
+      imm((void*)calledFunc),
+      FuncSignatureT<double, size_t, double, double, double, double>(CallConv::kIdHost, 1));
+    call->setArg(0, imm(4));
+    call->setArg(1, a0);
+    call->setArg(2, a1);
+    call->setArg(3, a2);
+    call->setArg(4, a3);
+    call->setRet(0, a0);
+
+    cc.ret(a0);
+    cc.endFunc();
+  }
+
+  virtual bool run(void* _func, String& result, String& expect) {
+    typedef double (*Func)(double, double, double, double);
+    Func func = ptr_as_func<Func>(_func);
+
+    double resultRet = func(1.0, 2.0, 3.0, 4.0);
+    double expectRet = 1.0 + 2.0 + 3.0 + 4.0;
+
+    result.assignFormat("ret=%f", resultRet);
+    expect.assignFormat("ret=%f", expectRet);
+
+    return resultRet == expectRet;
+  }
+
+  static double calledFunc(size_t n, ...) {
+    double sum = 0;
+    va_list ap;
+    va_start(ap, n);
+    for (size_t i = 0; i < n; i++) {
+      double arg = va_arg(ap, double);
+      sum += arg;
+    }
+    va_end(ap);
+    return sum;
   }
 };
 
@@ -3158,7 +3328,7 @@ public:
     app.add(new X86Test_FuncCallMisc1());
   }
 
-  static void dummy(int a, int b) {}
+  static void dummy(int, int) {}
 
   virtual void compile(x86::Compiler& cc) {
     cc.addFunc(FuncSignatureT<int, int, int>(CallConv::kIdHost));
@@ -3170,7 +3340,9 @@ public:
     cc.setArg(0, a);
     cc.setArg(1, b);
 
-    FuncCallNode* call = cc.call(imm(dummy), FuncSignatureT<void, int, int>(CallConv::kIdHost));
+    FuncCallNode* call = cc.call(
+      imm((void*)dummy),
+      FuncSignatureT<void, int, int>(CallConv::kIdHost));
     call->setArg(0, a);
     call->setArg(1, b);
 
@@ -3180,15 +3352,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func(44, 199);
     int expectRet = 243;
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -3207,19 +3379,18 @@ public:
   }
 
   virtual void compile(x86::Compiler& cc) {
-    FuncNode* func = cc.addFunc(FuncSignatureT<double, const double*>(CallConv::kIdHost));
+    cc.addFunc(FuncSignatureT<double, const double*>(CallConv::kIdHost));
 
     x86::Gp p = cc.newIntPtr("p");
-    x86::Gp fn = cc.newIntPtr("fn");
-
     x86::Xmm arg = cc.newXmmSd("arg");
     x86::Xmm ret = cc.newXmmSd("ret");
 
     cc.setArg(0, p);
     cc.movsd(arg, x86::ptr(p));
-    cc.mov(fn, imm(op));
 
-    FuncCallNode* call = cc.call(fn, FuncSignatureT<double, double>(CallConv::kIdHost));
+    FuncCallNode* call = cc.call(
+      imm((void*)op),
+      FuncSignatureT<double, double>(CallConv::kIdHost));
     call->setArg(0, arg);
     call->setRet(0, ret);
 
@@ -3227,7 +3398,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef double (*Func)(const double*);
     Func func = ptr_as_func<Func>(_func);
 
@@ -3236,8 +3407,8 @@ public:
     double resultRet = func(&arg);
     double expectRet = op(arg);
 
-    result.setFormat("ret=%g", resultRet);
-    expect.setFormat("ret=%g", expectRet);
+    result.assignFormat("ret=%g", resultRet);
+    expect.assignFormat("ret=%g", expectRet);
 
     return resultRet == expectRet;
   }
@@ -3258,19 +3429,18 @@ public:
   }
 
   virtual void compile(x86::Compiler& cc) {
-    FuncNode* func = cc.addFunc(FuncSignatureT<double, const double*>(CallConv::kIdHost));
+    cc.addFunc(FuncSignatureT<double, const double*>(CallConv::kIdHost));
 
     x86::Gp p = cc.newIntPtr("p");
-    x86::Gp fn = cc.newIntPtr("fn");
-
     x86::Xmm arg = cc.newXmmSd("arg");
     x86::Xmm ret = cc.newXmmSd("ret");
 
     cc.setArg(0, p);
     cc.movsd(arg, x86::ptr(p));
-    cc.mov(fn, imm(op));
 
-    FuncCallNode* call = cc.call(fn, FuncSignatureT<double, double>(CallConv::kIdHost));
+    FuncCallNode* call = cc.call(
+      imm((void*)op),
+      FuncSignatureT<double, double>(CallConv::kIdHost));
     call->setArg(0, arg);
     call->setRet(0, ret);
 
@@ -3281,7 +3451,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef double (*Func)(const double*);
     Func func = ptr_as_func<Func>(_func);
 
@@ -3290,8 +3460,8 @@ public:
     double resultRet = func(&arg);
     double expectRet = -op(arg);
 
-    result.setFormat("ret=%g", resultRet);
-    expect.setFormat("ret=%g", expectRet);
+    result.assignFormat("ret=%g", resultRet);
+    expect.assignFormat("ret=%g", expectRet);
 
     return resultRet == expectRet;
   }
@@ -3320,7 +3490,7 @@ public:
     FuncSignatureBuilder callPrototype;
     callPrototype.setCallConv(CallConv::kIdHost);
     callPrototype.setRet(Type::kIdF64);
-    FuncCallNode* call = cc.call(imm(calledFunc), callPrototype);
+    FuncCallNode* call = cc.call(imm((void*)calledFunc), callPrototype);
 
     x86::Xmm ret = cc.newXmmSd("ret");
     call->setRet(0, ret);
@@ -3329,15 +3499,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef double (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
     double resultRet = func();
     double expectRet = 3.14;
 
-    result.setFormat("ret=%g", resultRet);
-    expect.setFormat("ret=%g", expectRet);
+    result.assignFormat("ret=%g", resultRet);
+    expect.assignFormat("ret=%g", expectRet);
 
     return resultRet == expectRet;
   }
@@ -3367,7 +3537,7 @@ public:
     uint32_t i, regCount = cc.gpCount();
     ASMJIT_ASSERT(regCount <= ASMJIT_ARRAY_SIZE(vars));
 
-    cc.mov(pFn, imm(calledFunc));
+    cc.mov(pFn, imm((void*)calledFunc));
 
     for (i = 0; i < regCount; i++) {
       if (i == x86::Gp::kIdBp || i == x86::Gp::kIdSp)
@@ -3386,15 +3556,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func();
     int expectRet = sizeof(void*) == 4 ? 6 : 14;
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -3431,15 +3601,15 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(void);
     Func func = ptr_as_func<Func>(_func);
 
     int resultRet = func();
     int expectRet = 233;
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return resultRet == expectRet;
   }
@@ -3513,7 +3683,7 @@ struct X86Test_MiscMultiRet : public X86Test {
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int, int);
 
     Func func = ptr_as_func<Func>(_func);
@@ -3530,8 +3700,8 @@ struct X86Test_MiscMultiRet : public X86Test {
     int e2 = a * b;
     int e3 = a / b;
 
-    result.setFormat("ret={%d %d %d %d}", r0, r1, r2, r3);
-    expect.setFormat("ret={%d %d %d %d}", e0, e1, e2, e3);
+    result.assignFormat("ret={%d %d %d %d}", r0, r1, r2, r3);
+    expect.assignFormat("ret={%d %d %d %d}", e0, e1, e2, e3);
 
     return result.eq(expect);
   }
@@ -3584,7 +3754,7 @@ public:
     }
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (*Func)(int, int);
 
     Func func = ptr_as_func<Func>(_func);
@@ -3592,8 +3762,8 @@ public:
     int resultRet = func(56, 22);
     int expectRet = 56 + 22;
 
-    result.setFormat("ret=%d", resultRet);
-    expect.setFormat("ret=%d", expectRet);
+    result.assignFormat("ret=%d", resultRet);
+    expect.assignFormat("ret=%d", expectRet);
 
     return result.eq(expect);
   }
@@ -3619,7 +3789,7 @@ public:
     // arguments will be passed by registers and there won't be any stack
     // misalignment when we call the `handler()`. This was failing on OSX
     // when targeting 32-bit.
-    cc.addFunc(FuncSignatureT<void, int, void*>(CallConv::kIdHostFastCall));
+    cc.addFunc(FuncSignatureT<int, int, void*>(CallConv::kIdHostFastCall));
 
     x86::Gp a = cc.newInt32("a");
     x86::Gp b = cc.newIntPtr("b");
@@ -3639,7 +3809,7 @@ public:
     cc.endFunc();
   }
 
-  virtual bool run(void* _func, StringBuilder& result, StringBuilder& expect) {
+  virtual bool run(void* _func, String& result, String& expect) {
     typedef int (ASMJIT_FASTCALL *Func)(int, void*);
 
     Func func = ptr_as_func<Func>(_func);
@@ -3652,8 +3822,8 @@ public:
     else
       resultRet = 1;
 
-    result.setFormat("ret={%d}", resultRet);
-    expect.setFormat("ret={%d}", expectRet);
+    result.assignFormat("ret={%d}", resultRet);
+    expect.assignFormat("ret={%d}", expectRet);
 
     return resultRet == expectRet;
   }
@@ -3692,7 +3862,8 @@ int main(int argc, char* argv[]) {
   app.addT<X86Test_AllocIdiv1>();
   app.addT<X86Test_AllocSetz>();
   app.addT<X86Test_AllocShlRor>();
-  app.addT<X86Test_AllocGpbLo>();
+  app.addT<X86Test_AllocGpbLo1>();
+  app.addT<X86Test_AllocGpbLo2>();
   app.addT<X86Test_AllocRepMovsb>();
   app.addT<X86Test_AllocIfElse1>();
   app.addT<X86Test_AllocIfElse2>();
@@ -3727,6 +3898,8 @@ int main(int argc, char* argv[]) {
   app.addT<X86Test_FuncCallConditional>();
   app.addT<X86Test_FuncCallMultiple>();
   app.addT<X86Test_FuncCallRecursive>();
+  app.addT<X86Test_FuncCallVarArg1>();
+  app.addT<X86Test_FuncCallVarArg2>();
   app.addT<X86Test_FuncCallMisc1>();
   app.addT<X86Test_FuncCallMisc2>();
   app.addT<X86Test_FuncCallMisc3>();

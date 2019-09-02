@@ -1,25 +1,24 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_ZONESTACK_H
 #define _ASMJIT_CORE_ZONESTACK_H
 
-// [Dependencies]
 #include "../core/zone.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_support
+//! \addtogroup asmjit_zone
 //! \{
 
 // ============================================================================
 // [asmjit::ZoneStackBase]
 // ============================================================================
 
+//! Base class used by `ZoneStack<T>`.
 class ZoneStackBase {
 public:
   ASMJIT_NONCOPYABLE(ZoneStackBase)
@@ -64,9 +63,13 @@ public:
     void* _end;                          //!< Pointer to the end of the array.
   };
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! Allocator used to allocate data.
+  ZoneAllocator* _allocator;
+  //! First and last blocks.
+  Block* _block[Globals::kLinkCount];
+
+  //! \name Construction / Destruction
+  //! \{
 
   inline ZoneStackBase() noexcept {
     _allocator = nullptr;
@@ -75,19 +78,16 @@ public:
   }
   inline ~ZoneStackBase() noexcept { reset(); }
 
-  // --------------------------------------------------------------------------
-  // [Init / Reset]
-  // --------------------------------------------------------------------------
-
   inline bool isInitialized() const noexcept { return _allocator != nullptr; }
   ASMJIT_API Error _init(ZoneAllocator* allocator, size_t middleIndex) noexcept;
   inline Error reset() noexcept { return _init(nullptr, 0); }
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Get a `ZoneAllocator` attached to this container.
+  //! \name Accessors
+  //! \{
+
+  //! Returns `ZoneAllocator` attached to this container.
   inline ZoneAllocator* allocator() const noexcept { return _allocator; }
 
   inline bool empty() const noexcept {
@@ -95,25 +95,24 @@ public:
     return _block[0]->start<void>() == _block[1]->end<void>();
   }
 
-  // --------------------------------------------------------------------------
-  // [Ops]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \cond INTERNAL
+  //! \name Internal
+  //! \{
 
   ASMJIT_API Error _prepareBlock(uint32_t side, size_t initialIndex) noexcept;
   ASMJIT_API void _cleanupBlock(uint32_t side, size_t middleIndex) noexcept;
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  ZoneAllocator* _allocator;             //!< Allocator used to allocate data.
-  Block* _block[Globals::kLinkCount];    //!< First and last blocks.
+  //! \}
+  //! \endcond
 };
 
 // ============================================================================
 // [asmjit::ZoneStack<T>]
 // ============================================================================
 
+//! Zone allocated stack container.
 template<typename T>
 class ZoneStack : public ZoneStackBase {
 public:
@@ -126,22 +125,18 @@ public:
     kEndBlockIndex   = uint32_t(kStartBlockIndex + (kNumBlockItems    ) * sizeof(T))
   };
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! \name Construction / Destruction
+  //! \{
 
   inline ZoneStack() noexcept {}
   inline ~ZoneStack() noexcept {}
 
-  // --------------------------------------------------------------------------
-  // [Init / Reset]
-  // --------------------------------------------------------------------------
-
   inline Error init(ZoneAllocator* allocator) noexcept { return _init(allocator, kMidBlockIndex); }
 
-  // --------------------------------------------------------------------------
-  // [Ops]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Utilities
+  //! \{
 
   ASMJIT_INLINE Error prepend(T item) noexcept {
     ASMJIT_ASSERT(isInitialized());
@@ -211,11 +206,12 @@ public:
 
     return item;
   }
+
+  //! \}
 };
 
 //! \}
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
 #endif // _ASMJIT_CORE_ZONESTACK_H

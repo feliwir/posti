@@ -1,17 +1,14 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Guard]
 #include "../core/build.h"
-#if defined(ASMJIT_BUILD_X86) && !defined(ASMJIT_DISABLE_COMPILER)
+#if defined(ASMJIT_BUILD_X86) && !defined(ASMJIT_NO_COMPILER)
 
-// [Dependencies]
 #include "../x86/x86assembler.h"
 #include "../x86/x86builder.h"
 
@@ -33,7 +30,6 @@ Builder::~Builder() noexcept {}
 
 Error Builder::finalize() {
   ASMJIT_PROPAGATE(runPasses());
-
   Assembler a(_code);
   return serialize(&a);
 }
@@ -55,5 +51,4 @@ Error Builder::onAttach(CodeHolder* code) noexcept {
 
 ASMJIT_END_SUB_NAMESPACE
 
-// [Guard]
-#endif // ASMJIT_BUILD_X86 && !ASMJIT_DISABLE_COMPILER
+#endif // ASMJIT_BUILD_X86 && !ASMJIT_NO_COMPILER

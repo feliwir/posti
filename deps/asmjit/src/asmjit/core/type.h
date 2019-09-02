@@ -1,25 +1,24 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_TYPE_H
 #define _ASMJIT_CORE_TYPE_H
 
-// [Dependencies]
 #include "../core/globals.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_api
+//! \addtogroup asmjit_core
 //! \{
 
 // ============================================================================
 // [asmjit::Type]
 // ============================================================================
 
+//! Provides minimum type-system that is used by \ref asmjit_func and \ref asmjit_compiler.
 namespace Type {
 
 //! TypeId.
@@ -154,14 +153,14 @@ static constexpr bool isBase(uint32_t typeId) noexcept { return typeId >= _kIdBa
 static constexpr bool isAbstract(uint32_t typeId) noexcept { return typeId >= kIdIntPtr && typeId <= kIdUIntPtr; }
 
 static constexpr bool isInt(uint32_t typeId) noexcept { return typeId >= _kIdIntStart && typeId <= _kIdIntEnd; }
-static constexpr bool isI8(uint32_t typeId) noexcept { return typeId == kIdI8; }
-static constexpr bool isU8(uint32_t typeId) noexcept { return typeId == kIdU8; }
-static constexpr bool isI16(uint32_t typeId) noexcept { return typeId == kIdI16; }
-static constexpr bool isU16(uint32_t typeId) noexcept { return typeId == kIdU16; }
-static constexpr bool isI32(uint32_t typeId) noexcept { return typeId == kIdI32; }
-static constexpr bool isU32(uint32_t typeId) noexcept { return typeId == kIdU32; }
-static constexpr bool isI64(uint32_t typeId) noexcept { return typeId == kIdI64; }
-static constexpr bool isU64(uint32_t typeId) noexcept { return typeId == kIdU64; }
+static constexpr bool isInt8(uint32_t typeId) noexcept { return typeId == kIdI8; }
+static constexpr bool isUInt8(uint32_t typeId) noexcept { return typeId == kIdU8; }
+static constexpr bool isInt16(uint32_t typeId) noexcept { return typeId == kIdI16; }
+static constexpr bool isUInt16(uint32_t typeId) noexcept { return typeId == kIdU16; }
+static constexpr bool isInt32(uint32_t typeId) noexcept { return typeId == kIdI32; }
+static constexpr bool isUInt32(uint32_t typeId) noexcept { return typeId == kIdU32; }
+static constexpr bool isInt64(uint32_t typeId) noexcept { return typeId == kIdI64; }
+static constexpr bool isUInt64(uint32_t typeId) noexcept { return typeId == kIdU64; }
 
 static constexpr bool isGp8(uint32_t typeId) noexcept { return typeId >= kIdI8 && typeId <= kIdU8; }
 static constexpr bool isGp16(uint32_t typeId) noexcept { return typeId >= kIdI16 && typeId <= kIdU16; }
@@ -169,9 +168,9 @@ static constexpr bool isGp32(uint32_t typeId) noexcept { return typeId >= kIdI32
 static constexpr bool isGp64(uint32_t typeId) noexcept { return typeId >= kIdI64 && typeId <= kIdU64; }
 
 static constexpr bool isFloat(uint32_t typeId) noexcept { return typeId >= _kIdFloatStart && typeId <= _kIdFloatEnd; }
-static constexpr bool isF32(uint32_t typeId) noexcept { return typeId == kIdF32; }
-static constexpr bool isF64(uint32_t typeId) noexcept { return typeId == kIdF64; }
-static constexpr bool isF80(uint32_t typeId) noexcept { return typeId == kIdF80; }
+static constexpr bool isFloat32(uint32_t typeId) noexcept { return typeId == kIdF32; }
+static constexpr bool isFloat64(uint32_t typeId) noexcept { return typeId == kIdF64; }
+static constexpr bool isFloat80(uint32_t typeId) noexcept { return typeId == kIdF80; }
 
 static constexpr bool isMask(uint32_t typeId) noexcept { return typeId >= _kIdMaskStart && typeId <= _kIdMaskEnd; }
 static constexpr bool isMask8(uint32_t typeId) noexcept { return typeId == kIdMask8; }
@@ -190,11 +189,16 @@ static constexpr bool isVec128(uint32_t typeId) noexcept { return typeId >= _kId
 static constexpr bool isVec256(uint32_t typeId) noexcept { return typeId >= _kIdVec256Start && typeId <= _kIdVec256End; }
 static constexpr bool isVec512(uint32_t typeId) noexcept { return typeId >= _kIdVec512Start && typeId <= _kIdVec512End; }
 
-//! IdOfT<> template allows to get a TypeId of a C++ type.
-template<typename T> struct IdOfT {}; // Fail if not specialized.
+//! IdOfT<> template allows to get a TypeId of a C++ `T` type.
+template<typename T> struct IdOfT { /* Fail if not specialized. */ };
 
+//! \cond
 template<typename T> struct IdOfT<T*> {
-  static constexpr uint32_t kTypeId = kIdUIntPtr;
+  enum : uint32_t { kTypeId = kIdUIntPtr };
+};
+
+template<typename T> struct IdOfT<T&> {
+  enum : uint32_t { kTypeId = kIdUIntPtr };
 };
 
 template<typename T>
@@ -226,29 +230,30 @@ struct BaseOfTypeId {
 template<uint32_t TYPE_ID>
 struct SizeOfTypeId {
   static constexpr uint32_t kTypeSize =
-    isI8    (TYPE_ID) ?  1 :
-    isU8    (TYPE_ID) ?  1 :
-    isI16   (TYPE_ID) ?  2 :
-    isU16   (TYPE_ID) ?  2 :
-    isI32   (TYPE_ID) ?  4 :
-    isU32   (TYPE_ID) ?  4 :
-    isI64   (TYPE_ID) ?  8 :
-    isU64   (TYPE_ID) ?  8 :
-    isF32   (TYPE_ID) ?  4 :
-    isF64   (TYPE_ID) ?  8 :
-    isF80   (TYPE_ID) ? 10 :
-    isMask8 (TYPE_ID) ?  1 :
-    isMask16(TYPE_ID) ?  2 :
-    isMask32(TYPE_ID) ?  4 :
-    isMask64(TYPE_ID) ?  8 :
-    isMmx32 (TYPE_ID) ?  4 :
-    isMmx64 (TYPE_ID) ?  8 :
-    isVec32 (TYPE_ID) ?  4 :
-    isVec64 (TYPE_ID) ?  8 :
-    isVec128(TYPE_ID) ? 16 :
-    isVec256(TYPE_ID) ? 32 :
-    isVec512(TYPE_ID) ? 64 : 0;
+    isInt8   (TYPE_ID) ?  1 :
+    isUInt8  (TYPE_ID) ?  1 :
+    isInt16  (TYPE_ID) ?  2 :
+    isUInt16 (TYPE_ID) ?  2 :
+    isInt32  (TYPE_ID) ?  4 :
+    isUInt32 (TYPE_ID) ?  4 :
+    isInt64  (TYPE_ID) ?  8 :
+    isUInt64 (TYPE_ID) ?  8 :
+    isFloat32(TYPE_ID) ?  4 :
+    isFloat64(TYPE_ID) ?  8 :
+    isFloat80(TYPE_ID) ? 10 :
+    isMask8  (TYPE_ID) ?  1 :
+    isMask16 (TYPE_ID) ?  2 :
+    isMask32 (TYPE_ID) ?  4 :
+    isMask64 (TYPE_ID) ?  8 :
+    isMmx32  (TYPE_ID) ?  4 :
+    isMmx64  (TYPE_ID) ?  8 :
+    isVec32  (TYPE_ID) ?  4 :
+    isVec64  (TYPE_ID) ?  8 :
+    isVec128 (TYPE_ID) ? 16 :
+    isVec256 (TYPE_ID) ? 32 :
+    isVec512 (TYPE_ID) ? 64 : 0;
 };
+//! \endcond
 
 static inline uint32_t baseOf(uint32_t typeId) noexcept {
   ASMJIT_ASSERT(typeId <= kIdMax);
@@ -260,12 +265,13 @@ static inline uint32_t sizeOf(uint32_t typeId) noexcept {
   return _typeData.sizeOf[typeId];
 }
 
-//! Get an offset to convert a `kIntPtr` and `kUIntPtr` TypeId into a
-//! type that matches `gpSize` (general-purpose register size). If you
-//! find such TypeId it's then only about adding the offset to it.
+//! Returns offset needed to convert a `kIntPtr` and `kUIntPtr` TypeId
+//! into a type that matches `gpSize` (general-purpose register size).
+//! If you find such TypeId it's then only about adding the offset to it.
 //!
 //! For example:
-//! ~~~
+//!
+//! ```
 //! uint32_t gpSize = '4' or '8';
 //! uint32_t deabstractDelta = Type::deabstractDeltaOfSize(gpSize);
 //!
@@ -276,7 +282,7 @@ static inline uint32_t sizeOf(uint32_t typeId) noexcept {
 //!
 //! // The same, but by using Type::deabstract() function.
 //! typeId = Type::deabstract(typeId, deabstractDelta);
-//! ~~~
+//! ```
 static constexpr uint32_t deabstractDeltaOfSize(uint32_t gpSize) noexcept {
   return gpSize >= 8 ? kIdI64 - kIdIntPtr : kIdI32 - kIdIntPtr;
 }
@@ -285,32 +291,46 @@ static constexpr uint32_t deabstract(uint32_t typeId, uint32_t deabstractDelta) 
   return isAbstract(typeId) ? typeId + deabstractDelta : typeId;
 }
 
-struct Bool {};                          //!< bool as C++ type-name.
-struct I8   {};                          //!< int8_t as C++ type-name.
-struct U8   {};                          //!< uint8_t as C++ type-name.
-struct I16  {};                          //!< int16_t as C++ type-name.
-struct U16  {};                          //!< uint16_t as C++ type-name.
-struct I32  {};                          //!< int32_t as C++ type-name.
-struct U32  {};                          //!< uint32_t as C++ type-name.
-struct I64  {};                          //!< int64_t as C++ type-name.
-struct U64  {};                          //!< uint64_t as C++ type-name.
-struct IPtr {};                          //!< intptr_t as C++ type-name.
-struct UPtr {};                          //!< uintptr_t as C++ type-name.
-struct F32  {};                          //!< float as C++ type-name.
-struct F64  {};                          //!< double as C++ type-name.
+//! bool as C++ type-name.
+struct Bool {};
+//! int8_t as C++ type-name.
+struct I8 {};
+//! uint8_t as C++ type-name.
+struct U8 {};
+//! int16_t as C++ type-name.
+struct I16 {};
+//! uint16_t as C++ type-name.
+struct U16 {};
+//! int32_t as C++ type-name.
+struct I32 {};
+//! uint32_t as C++ type-name.
+struct U32 {};
+//! int64_t as C++ type-name.
+struct I64 {};
+//! uint64_t as C++ type-name.
+struct U64 {};
+//! intptr_t as C++ type-name.
+struct IPtr {};
+//! uintptr_t as C++ type-name.
+struct UPtr {};
+//! float as C++ type-name.
+struct F32 {};
+//! double as C++ type-name.
+struct F64 {};
 
-} // Type namespace
+} // {Type}
 
 // ============================================================================
 // [ASMJIT_DEFINE_TYPE_ID]
 // ============================================================================
 
-#define ASMJIT_DEFINE_TYPE_ID(T, TYPE_ID)        \
-namespace Type {                                 \
-  template<>                                     \
-  struct IdOfT<T> {                              \
-    static constexpr uint32_t kTypeId = TYPE_ID; \
-  };                                             \
+//! \cond
+#define ASMJIT_DEFINE_TYPE_ID(T, TYPE_ID)  \
+namespace Type {                           \
+  template<>                               \
+  struct IdOfT<T> {                        \
+    enum : uint32_t { kTypeId = TYPE_ID }; \
+  };                                       \
 }
 
 ASMJIT_DEFINE_TYPE_ID(bool              , IdOfIntT<bool              >::kTypeId);
@@ -352,10 +372,10 @@ ASMJIT_DEFINE_TYPE_ID(IPtr              , kIdIntPtr);
 ASMJIT_DEFINE_TYPE_ID(UPtr              , kIdUIntPtr);
 ASMJIT_DEFINE_TYPE_ID(F32               , kIdF32);
 ASMJIT_DEFINE_TYPE_ID(F64               , kIdF64);
+//! \endcond
 
 //! \}
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
 #endif // _ASMJIT_CORE_TYPE_H

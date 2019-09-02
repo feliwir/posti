@@ -1,17 +1,15 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_X86_X86RAPASS_P_H
 #define _ASMJIT_X86_X86RAPASS_P_H
 
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_COMPILER
+#ifndef ASMJIT_NO_COMPILER
 
-// [Dependencies]
 #include "../core/compiler.h"
 #include "../core/rabuilders_p.h"
 #include "../core/rapass_p.h"
@@ -20,6 +18,13 @@
 
 ASMJIT_BEGIN_SUB_NAMESPACE(x86)
 
+//! \cond INTERNAL
+
+//! \defgroup asmjit_x86_ra X86 RA
+//! \ingroup asmjit_x86
+//!
+//! \brief X86/X64 register allocation.
+
 //! \addtogroup asmjit_x86_ra
 //! \{
 
@@ -27,8 +32,6 @@ ASMJIT_BEGIN_SUB_NAMESPACE(x86)
 // [asmjit::X86RAPass]
 // ============================================================================
 
-//! \internal
-//!
 //! X86 register allocation pass.
 //!
 //! Takes care of generating function prologs and epilogs, and also performs
@@ -37,6 +40,8 @@ class X86RAPass : public RAPass {
 public:
   ASMJIT_NONCOPYABLE(X86RAPass)
   typedef RAPass Base;
+
+  bool _avxEnabled;
 
   // --------------------------------------------------------------------------
   // [Construction / Destruction]
@@ -49,8 +54,16 @@ public:
   // [Accessors]
   // --------------------------------------------------------------------------
 
-  //! Get compiler as `x86::Compiler`.
+  //! Returns the compiler casted to `x86::Compiler`.
   inline Compiler* cc() const noexcept { return static_cast<Compiler*>(_cb); }
+
+  // --------------------------------------------------------------------------
+  // [Utilities]
+  // --------------------------------------------------------------------------
+
+  inline uint32_t choose(uint32_t sseInstId, uint32_t avxInstId) noexcept {
+    return _avxEnabled ? avxInstId : sseInstId;
+  }
 
   // --------------------------------------------------------------------------
   // [OnInit / OnDone]
@@ -76,18 +89,13 @@ public:
   Error onEmitSave(uint32_t workId, uint32_t srcPhysId) noexcept override;
 
   Error onEmitJump(const Label& label) noexcept override;
-
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  bool _avxEnabled;
+  Error onEmitPreCall(FuncCallNode* node) noexcept override;
 };
 
 //! \}
+//! \endcond
 
 ASMJIT_END_SUB_NAMESPACE
 
-// [Guard]
-#endif // !ASMJIT_DISABLE_COMPILER
+#endif // !ASMJIT_NO_COMPILER
 #endif // _ASMJIT_X86_X86RAPASS_P_H

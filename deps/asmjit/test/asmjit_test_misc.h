@@ -1,14 +1,12 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_TEST_MISC_H
 #define _ASMJIT_TEST_MISC_H
 
-// [Dependencies]
 #include "./asmjit.h"
 
 namespace asmtest {
@@ -166,7 +164,6 @@ static void generateAlphaBlend(asmjit::x86::Compiler& cc) {
   cc.dxmm(Data128::fromI16(0x0101));
 }
 
-} // asmtest namespace
+} // {asmtest}
 
-// [Guard]
 #endif // _ASMJIT_TEST_MISC_H

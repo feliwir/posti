@@ -1,25 +1,21 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Guard]
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_LOGGING
+#ifndef ASMJIT_NO_LOGGING
 
-// [Dependencies]
 #include "../core/misc_p.h"
-#include "../core/stringutils.h"
-
-#include "../x86/x86instdb.h"
+#include "../core/support.h"
+#include "../x86/x86instdb_p.h"
 #include "../x86/x86logging_p.h"
 #include "../x86/x86operand.h"
 
-#ifndef ASMJIT_DISABLE_COMPILER
+#ifndef ASMJIT_NO_COMPILER
   #include "../core/compiler.h"
 #endif
 
@@ -189,7 +185,7 @@ static const char* x86GetAddressSizeString(uint32_t size) noexcept {
 // ============================================================================
 
 ASMJIT_FAVOR_SIZE Error LoggingInternal::formatOperand(
-  StringBuilder& sb,
+  String& sb,
   uint32_t flags,
   const BaseEmitter* emitter,
   uint32_t archId,
@@ -208,8 +204,10 @@ ASMJIT_FAVOR_SIZE Error LoggingInternal::formatOperand(
       ASMJIT_PROPAGATE(sb.appendFormat("%s:", x86RegFormatInfo.nameStrings + 224 + seg * 4));
 
     ASMJIT_PROPAGATE(sb.appendChar('['));
-    if (m.isAbs())
-      ASMJIT_PROPAGATE(sb.appendString("abs "));
+    switch (m.addrType()) {
+      case BaseMem::kAddrTypeAbs: ASMJIT_PROPAGATE(sb.appendString("abs ")); break;
+      case BaseMem::kAddrTypeRel: ASMJIT_PROPAGATE(sb.appendString("rel ")); break;
+    }
 
     char opSign = '\0';
     if (m.hasBase()) {
@@ -238,7 +236,7 @@ ASMJIT_FAVOR_SIZE Error LoggingInternal::formatOperand(
     }
 
     uint64_t off = uint64_t(m.offset());
-    if (off) {
+    if (off || !m.hasBaseOrIndex()) {
       if (int64_t(off) < 0) {
         opSign = '-';
         off = ~off + 1;
@@ -263,10 +261,13 @@ ASMJIT_FAVOR_SIZE Error LoggingInternal::formatOperand(
     const Imm& i = op.as<Imm>();
     int64_t val = i.i64();
 
-    if ((flags & FormatOptions::kFlagHexImms) != 0 && uint64_t(val) > 9)
+    if ((flags & FormatOptions::kFlagHexImms) != 0 && uint64_t(val) > 9) {
+      ASMJIT_PROPAGATE(sb.appendString("0x", 2));
       return sb.appendUInt(uint64_t(val), 16);
-    else
+    }
+    else {
       return sb.appendInt(val, 10);
+    }
   }
 
   if (op.isLabel()) {
@@ -296,7 +297,7 @@ struct ImmBits {
   char text[48 - 3];
 };
 
-ASMJIT_FAVOR_SIZE static Error LoggingInternal_formatImmShuf(StringBuilder& sb, uint32_t u8, uint32_t bits, uint32_t count) noexcept {
+ASMJIT_FAVOR_SIZE static Error LoggingInternal_formatImmShuf(String& sb, uint32_t u8, uint32_t bits, uint32_t count) noexcept {
   uint32_t mask = (1 << bits) - 1;
 
   for (uint32_t i = 0; i < count; i++, u8 >>= bits) {
@@ -311,7 +312,7 @@ ASMJIT_FAVOR_SIZE static Error LoggingInternal_formatImmShuf(StringBuilder& sb, 
   return kErrorOk;
 }
 
-ASMJIT_FAVOR_SIZE static Error LoggingInternal_formatImmBits(StringBuilder& sb, uint32_t u8, const ImmBits* bits, uint32_t count) noexcept {
+ASMJIT_FAVOR_SIZE static Error LoggingInternal_formatImmBits(String& sb, uint32_t u8, const ImmBits* bits, uint32_t count) noexcept {
   uint32_t n = 0;
   char buf[64];
 
@@ -323,11 +324,11 @@ ASMJIT_FAVOR_SIZE static Error LoggingInternal_formatImmBits(StringBuilder& sb, 
 
     switch (spec.mode) {
       case ImmBits::kModeLookup:
-        str = StringUtils::findPackedString(spec.text, value);
+        str = Support::findPackedString(spec.text, value);
         break;
 
       case ImmBits::kModeFormat:
-        std::snprintf(buf, sizeof(buf), spec.text, unsigned(value));
+        snprintf(buf, sizeof(buf), spec.text, unsigned(value));
         str = buf;
         break;
 
@@ -348,14 +349,14 @@ ASMJIT_FAVOR_SIZE static Error LoggingInternal_formatImmBits(StringBuilder& sb, 
   return kErrorOk;
 }
 
-ASMJIT_FAVOR_SIZE static Error LoggingInternal_formatImmText(StringBuilder& sb, uint32_t u8, uint32_t bits, uint32_t advance, const char* text, uint32_t count = 1) noexcept {
+ASMJIT_FAVOR_SIZE static Error LoggingInternal_formatImmText(String& sb, uint32_t u8, uint32_t bits, uint32_t advance, const char* text, uint32_t count = 1) noexcept {
   uint32_t mask = (1u << bits) - 1;
   uint32_t pos = 0;
 
   for (uint32_t i = 0; i < count; i++, u8 >>= bits, pos += advance) {
     uint32_t value = (u8 & mask) + pos;
     ASMJIT_PROPAGATE(sb.appendChar(i == 0 ? kImmCharStart : kImmCharOr));
-    ASMJIT_PROPAGATE(sb.appendString(StringUtils::findPackedString(text, value)));
+    ASMJIT_PROPAGATE(sb.appendString(Support::findPackedString(text, value)));
   }
 
   if (kImmCharEnd)
@@ -365,7 +366,7 @@ ASMJIT_FAVOR_SIZE static Error LoggingInternal_formatImmText(StringBuilder& sb, 
 }
 
 ASMJIT_FAVOR_SIZE static Error LoggingInternal_explainConst(
-  StringBuilder& sb,
+  String& sb,
   uint32_t flags,
   uint32_t instId,
   uint32_t vecSize,
@@ -473,14 +474,14 @@ ASMJIT_FAVOR_SIZE static Error LoggingInternal_explainConst(
 
     case Inst::kIdVmpsadbw:
     case Inst::kIdMpsadbw:
-      return LoggingInternal_formatImmBits(sb, u8, vmpsadbw, std::min<uint32_t>(vecSize / 8, 4));
+      return LoggingInternal_formatImmBits(sb, u8, vmpsadbw, Support::min<uint32_t>(vecSize / 8, 4));
 
     case Inst::kIdVpblendw:
     case Inst::kIdPblendw:
       return LoggingInternal_formatImmShuf(sb, u8, 1, 8);
 
     case Inst::kIdVpblendd:
-      return LoggingInternal_formatImmShuf(sb, u8, 1, std::min<uint32_t>(vecSize / 4, 8));
+      return LoggingInternal_formatImmShuf(sb, u8, 1, Support::min<uint32_t>(vecSize / 4, 8));
 
     case Inst::kIdVpclmulqdq:
     case Inst::kIdPclmulqdq:
@@ -498,7 +499,7 @@ ASMJIT_FAVOR_SIZE static Error LoggingInternal_explainConst(
 
     case Inst::kIdVshufpd:
     case Inst::kIdShufpd:
-      return LoggingInternal_formatImmText(sb, u8, 1, 2, vshufpd, std::min<uint32_t>(vecSize / 8, 8));
+      return LoggingInternal_formatImmText(sb, u8, 1, 2, vshufpd, Support::min<uint32_t>(vecSize / 8, 8));
 
     case Inst::kIdVshufps:
     case Inst::kIdShufps:
@@ -594,7 +595,7 @@ ASMJIT_FAVOR_SIZE static Error LoggingInternal_explainConst(
     case Inst::kIdVshuff64x2:
     case Inst::kIdVshufi32x4:
     case Inst::kIdVshufi64x2: {
-      uint32_t count = std::max<uint32_t>(vecSize / 16, 2u);
+      uint32_t count = Support::max<uint32_t>(vecSize / 16, 2u);
       uint32_t bits = count <= 2 ? 1u : 2u;
       return LoggingInternal_formatImmShuf(sb, u8, bits, count);
     }
@@ -608,19 +609,12 @@ ASMJIT_FAVOR_SIZE static Error LoggingInternal_explainConst(
 // [asmjit::x86::LoggingInternal - Format Register]
 // ============================================================================
 
-ASMJIT_FAVOR_SIZE Error LoggingInternal::formatRegister(
-  StringBuilder& sb,
-  uint32_t flags,
-  const BaseEmitter* emitter,
-  uint32_t archId,
-  uint32_t rType,
-  uint32_t rId) noexcept {
-
+ASMJIT_FAVOR_SIZE Error LoggingInternal::formatRegister(String& sb, uint32_t flags, const BaseEmitter* emitter, uint32_t archId, uint32_t rType, uint32_t rId) noexcept {
   ASMJIT_UNUSED(archId);
   const RegFormatInfo& info = x86RegFormatInfo;
 
-  #ifndef ASMJIT_DISABLE_COMPILER
-  if (Operand::isPackedId(rId)) {
+#ifndef ASMJIT_NO_COMPILER
+  if (Operand::isVirtId(rId)) {
     if (emitter && emitter->emitterType() == BaseEmitter::kTypeCompiler) {
       const BaseCompiler* cc = static_cast<const BaseCompiler*>(emitter);
       if (cc->isVirtIdValid(rId)) {
@@ -631,7 +625,7 @@ ASMJIT_FAVOR_SIZE Error LoggingInternal::formatRegister(
         if (name && name[0] != '\0')
           ASMJIT_PROPAGATE(sb.appendString(name));
         else
-          ASMJIT_PROPAGATE(sb.appendFormat("%%%u", unsigned(Operand::unpackId(rId))));
+          ASMJIT_PROPAGATE(sb.appendFormat("%%%u", unsigned(Operand::virtIdToIndex(rId))));
 
         if (vReg->type() != rType && rType <= BaseReg::kTypeMax && (flags & FormatOptions::kFlagRegCasts) != 0) {
           const RegFormatInfo::TypeEntry& typeEntry = info.typeEntries[rType];
@@ -643,9 +637,9 @@ ASMJIT_FAVOR_SIZE Error LoggingInternal::formatRegister(
       }
     }
   }
-  #else
+#else
   ASMJIT_UNUSED(flags);
-  #endif
+#endif
 
   if (ASMJIT_LIKELY(rType <= BaseReg::kTypeMax)) {
     const RegFormatInfo::NameEntry& nameEntry = info.nameEntries[rType];
@@ -669,11 +663,11 @@ ASMJIT_FAVOR_SIZE Error LoggingInternal::formatRegister(
 // ============================================================================
 
 ASMJIT_FAVOR_SIZE Error LoggingInternal::formatInstruction(
-  StringBuilder& sb,
+  String& sb,
   uint32_t flags,
   const BaseEmitter* emitter,
   uint32_t archId,
-  const BaseInst& inst, const Operand_* operands, uint32_t count) noexcept {
+  const BaseInst& inst, const Operand_* operands, uint32_t opCount) noexcept {
 
   uint32_t instId = inst.id();
   uint32_t options = inst.options();
@@ -695,7 +689,7 @@ ASMJIT_FAVOR_SIZE Error LoggingInternal::formatInstruction(
     if (options & (Inst::kOptionRep | Inst::kOptionRepne)) {
       sb.appendString((options & Inst::kOptionRep) ? "rep " : "repnz ");
       if (inst.hasExtraReg()) {
-        ASMJIT_PROPAGATE(sb.appendChar('{'));
+        ASMJIT_PROPAGATE(sb.appendString("{"));
         ASMJIT_PROPAGATE(formatOperand(sb, flags, emitter, archId, inst.extraReg().toReg<BaseReg>()));
         ASMJIT_PROPAGATE(sb.appendString("} "));
       }
@@ -724,13 +718,13 @@ ASMJIT_FAVOR_SIZE Error LoggingInternal::formatInstruction(
     if (options & Inst::kOptionVex3) ASMJIT_PROPAGATE(sb.appendString("vex3 "));
     if (options & Inst::kOptionEvex) ASMJIT_PROPAGATE(sb.appendString("evex "));
 
-    ASMJIT_PROPAGATE(sb.appendString(instInfo.name()));
+    ASMJIT_PROPAGATE(InstAPI::instIdToString(archId, instId, sb));
   }
   else {
     ASMJIT_PROPAGATE(sb.appendFormat("[InstId=#%u]", unsigned(instId)));
   }
 
-  for (uint32_t i = 0; i < count; i++) {
+  for (uint32_t i = 0; i < opCount; i++) {
     const Operand_& op = operands[i];
     if (op.isNone()) break;
 
@@ -739,9 +733,9 @@ ASMJIT_FAVOR_SIZE Error LoggingInternal::formatInstruction(
 
     if (op.isImm() && (flags & FormatOptions::kFlagExplainImms)) {
       uint32_t vecSize = 16;
-      for (uint32_t j = 0; j < count; j++)
+      for (uint32_t j = 0; j < opCount; j++)
         if (operands[j].isReg())
-          vecSize = std::max<uint32_t>(vecSize, operands[j].size());
+          vecSize = Support::max<uint32_t>(vecSize, operands[j].size());
       ASMJIT_PROPAGATE(LoggingInternal_explainConst(sb, flags, instId, vecSize, op.as<Imm>()));
     }
 
@@ -762,7 +756,7 @@ ASMJIT_FAVOR_SIZE Error LoggingInternal::formatInstruction(
 
     // Support AVX-512 broadcast - {1tox}.
     if (op.isMem() && op.as<Mem>().hasBroadcast()) {
-      ASMJIT_PROPAGATE(sb.appendFormat(" {1to%u}", Support::mask(op.as<Mem>().getBroadcast())));
+      ASMJIT_PROPAGATE(sb.appendFormat(" {1to%u}", Support::bitMask(op.as<Mem>().getBroadcast())));
     }
   }
 
@@ -771,5 +765,4 @@ ASMJIT_FAVOR_SIZE Error LoggingInternal::formatInstruction(
 
 ASMJIT_END_SUB_NAMESPACE
 
-// [Guard]
-#endif // !ASMJIT_DISABLE_LOGGING
+#endif // !ASMJIT_NO_LOGGING

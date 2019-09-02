@@ -1,19 +1,17 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_ZONELIST_H
 #define _ASMJIT_CORE_ZONELIST_H
 
-// [Dependencies]
 #include "../core/support.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_support
+//! \addtogroup asmjit_zone
 //! \{
 
 // ============================================================================
@@ -25,11 +23,21 @@ class ZoneListNode {
 public:
   ASMJIT_NONCOPYABLE(ZoneListNode)
 
+  NodeT* _listNodes[Globals::kLinkCount];
+
+  //! \name Construction & Destruction
+  //! \{
+
   inline ZoneListNode() noexcept
     : _listNodes { nullptr, nullptr } {}
 
   inline ZoneListNode(ZoneListNode&& other) noexcept
     : _listNodes { other._listNodes[0], other._listNodes[1] } {}
+
+  //! \}
+
+  //! \name Accessors
+  //! \{
 
   inline bool hasPrev() const noexcept { return _listNodes[Globals::kLinkPrev] != nullptr; }
   inline bool hasNext() const noexcept { return _listNodes[Globals::kLinkNext] != nullptr; }
@@ -37,11 +45,7 @@ public:
   inline NodeT* prev() const noexcept { return _listNodes[Globals::kLinkPrev]; }
   inline NodeT* next() const noexcept { return _listNodes[Globals::kLinkNext]; }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  NodeT* _listNodes[Globals::kLinkCount];
+  //! \}
 };
 
 // ============================================================================
@@ -53,32 +57,40 @@ class ZoneList {
 public:
   ASMJIT_NONCOPYABLE(ZoneList)
 
+  NodeT* _bounds[Globals::kLinkCount];
+
+  //! \name Construction & Destruction
+  //! \{
+
   inline ZoneList() noexcept
     : _bounds { nullptr, nullptr } {}
 
   inline ZoneList(ZoneList&& other) noexcept
     : _bounds { other._bounds[0], other._bounds[1] } {}
 
-  // --------------------------------------------------------------------------
-  // [Reset]
-  // --------------------------------------------------------------------------
-
   inline void reset() noexcept {
     _bounds[0] = nullptr;
     _bounds[1] = nullptr;
   }
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Accessors
+  //! \{
 
   inline bool empty() const noexcept { return _bounds[0] == nullptr; }
   inline NodeT* first() const noexcept { return _bounds[Globals::kLinkFirst]; }
   inline NodeT* last() const noexcept { return _bounds[Globals::kLinkLast]; }
 
-  // --------------------------------------------------------------------------
-  // [Operations]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Utilities
+  //! \{
+
+  inline void swap(ZoneList& other) noexcept {
+    std::swap(_bounds[0], other._bounds[0]);
+    std::swap(_bounds[1], other._bounds[1]);
+  }
 
   // Can be used to both prepend and append.
   inline void _addNode(NodeT* node, size_t dir) noexcept {
@@ -119,8 +131,8 @@ public:
     NodeT* prev = node->prev();
     NodeT* next = node->next();
 
-    if (prev) { prev->_listNodes[Globals::kLinkNext] = next; node->_listNodes[0] = nullptr; } else { _bounds[Globals::kLinkFirst] = next; }
-    if (next) { next->_listNodes[Globals::kLinkPrev] = prev; node->_listNodes[1] = nullptr; } else { _bounds[Globals::kLinkLast ] = prev; }
+    if (prev) { prev->_listNodes[1] = next; node->_listNodes[0] = nullptr; } else { _bounds[0] = next; }
+    if (next) { next->_listNodes[0] = prev; node->_listNodes[1] = nullptr; } else { _bounds[1] = prev; }
 
     node->_listNodes[0] = nullptr;
     node->_listNodes[1] = nullptr;
@@ -129,60 +141,46 @@ public:
   }
 
   inline NodeT* popFirst() noexcept {
-    NodeT* node = _bounds[Globals::kLinkFirst];
+    NodeT* node = _bounds[0];
     ASMJIT_ASSERT(node != nullptr);
 
     NodeT* next = node->next();
-    _bounds[Globals::kLinkFirst] = next;
+    _bounds[0] = next;
 
     if (next) {
-      next->_listNodes[Globals::kLinkPrev] = nullptr;
-      node->_listNodes[Globals::kLinkNext] = nullptr;
+      next->_listNodes[0] = nullptr;
+      node->_listNodes[1] = nullptr;
     }
     else {
-      _bounds[Globals::kLinkLast] = nullptr;
+      _bounds[1] = nullptr;
     }
 
     return node;
   }
 
   inline NodeT* pop() noexcept {
-    NodeT* node = _bounds[Globals::kLinkLast];
+    NodeT* node = _bounds[1];
     ASMJIT_ASSERT(node != nullptr);
 
     NodeT* prev = node->prev();
-    _bounds[Globals::kLinkLast] = prev;
+    _bounds[1] = prev;
 
     if (prev) {
-      prev->_listNodes[Globals::kLinkNext] = nullptr;
-      node->_listNodes[Globals::kLinkPrev] = nullptr;
+      prev->_listNodes[1] = nullptr;
+      node->_listNodes[0] = nullptr;
     }
     else {
-      _bounds[Globals::kLinkFirst] = nullptr;
+      _bounds[0] = nullptr;
     }
 
     return node;
   }
 
-  // --------------------------------------------------------------------------
-  // [Swap]
-  // --------------------------------------------------------------------------
-
-  inline void swapWith(ZoneList& other) noexcept {
-    std::swap(_bounds[0], other._bounds[0]);
-    std::swap(_bounds[1], other._bounds[1]);
-  }
-
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  NodeT* _bounds[Globals::kLinkCount];
+  //! \}
 };
 
 //! \}
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
 #endif // _ASMJIT_CORE_ZONELIST_H

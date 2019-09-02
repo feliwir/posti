@@ -1,16 +1,14 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
 #include "../core/cpuinfo.h"
 
-#if ASMJIT_OS_POSIX
+#if !defined(_WIN32)
   #include <errno.h>
   #include <sys/utsname.h>
   #include <unistd.h>
@@ -22,13 +20,13 @@ ASMJIT_BEGIN_NAMESPACE
 // [asmjit::CpuInfo - Detect - CPU NumThreads]
 // ============================================================================
 
-#if ASMJIT_OS_WINDOWS
+#if defined(_WIN32)
 static inline uint32_t detectHWThreadCount() noexcept {
   SYSTEM_INFO info;
   ::GetSystemInfo(&info);
   return info.dwNumberOfProcessors;
 }
-#elif ASMJIT_OS_POSIX && defined(_SC_NPROCESSORS_ONLN)
+#elif defined(_SC_NPROCESSORS_ONLN)
 static inline uint32_t detectHWThreadCount() noexcept {
   long res = ::sysconf(_SC_NPROCESSORS_ONLN);
   return res <= 0 ? uint32_t(1) : uint32_t(res);
@@ -55,23 +53,29 @@ namespace arm { void detectCpu(CpuInfo& cpu) noexcept; }
 // [asmjit::CpuInfo - Detect - Static Initializer]
 // ============================================================================
 
-struct HostCpuInfo : public CpuInfo {
-  inline HostCpuInfo() noexcept : CpuInfo() {
+static uint32_t cpuInfoInitialized;
+static CpuInfo cpuInfoGlobal(Globals::NoInit);
+
+const CpuInfo& CpuInfo::host() noexcept {
+  // This should never cause a problem as the resulting information should
+  // always be the same.
+  if (!cpuInfoInitialized) {
+    CpuInfo cpuInfoLocal;
+
     #if defined(ASMJIT_BUILD_X86) && ASMJIT_ARCH_X86
-    x86::detectCpu(*this);
+    x86::detectCpu(cpuInfoLocal);
     #endif
 
     #if defined(ASMJIT_BUILD_ARM) && ASMJIT_ARCH_ARM
-    arm::detectCpu(*this);
+    arm::detectCpu(cpuInfoLocal);
     #endif
 
-    _hwThreadCount = detectHWThreadCount();
+    cpuInfoLocal._hwThreadCount = detectHWThreadCount();
+    cpuInfoGlobal = cpuInfoLocal;
+    cpuInfoInitialized = 1;
   }
-};
 
-const CpuInfo& CpuInfo::host() noexcept {
-  static HostCpuInfo host;
-  return host;
+  return cpuInfoGlobal;
 }
 
 ASMJIT_END_NAMESPACE

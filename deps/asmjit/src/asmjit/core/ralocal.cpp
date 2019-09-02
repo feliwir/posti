@@ -1,21 +1,29 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Guard]
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_COMPILER
+#ifndef ASMJIT_NO_COMPILER
 
-// [Dependencies]
 #include "../core/ralocal_p.h"
 #include "../core/support.h"
 
 ASMJIT_BEGIN_NAMESPACE
+
+// ============================================================================
+// [asmjit::RALocalAllocator - Utilities]
+// ============================================================================
+
+static ASMJIT_INLINE RATiedReg* RALocal_findTiedRegByWorkId(RATiedReg* tiedRegs, size_t count, uint32_t workId) noexcept {
+  for (size_t i = 0; i < count; i++)
+    if (tiedRegs[i].workId() == workId)
+      return &tiedRegs[i];
+  return nullptr;
+}
 
 // ============================================================================
 // [asmjit::RALocalAllocator - Init / Reset]
@@ -28,7 +36,7 @@ Error RALocalAllocator::init() noexcept {
   physToWorkMap = _pass->newPhysToWorkMap();
   workToPhysMap = _pass->newWorkToPhysMap();
   if (!physToWorkMap || !workToPhysMap)
-    return DebugUtils::errored(kErrorNoHeapMemory);
+    return DebugUtils::errored(kErrorOutOfMemory);
 
   _curAssignment.initLayout(_pass->_physRegCount, _pass->workRegs());
   _curAssignment.initMaps(physToWorkMap, workToPhysMap);
@@ -36,7 +44,7 @@ Error RALocalAllocator::init() noexcept {
   physToWorkMap = _pass->newPhysToWorkMap();
   workToPhysMap = _pass->newWorkToPhysMap();
   if (!physToWorkMap || !workToPhysMap)
-    return DebugUtils::errored(kErrorNoHeapMemory);
+    return DebugUtils::errored(kErrorOutOfMemory);
 
   _tmpAssignment.initLayout(_pass->_physRegCount, _pass->workRegs());
   _tmpAssignment.initMaps(physToWorkMap, workToPhysMap);
@@ -62,50 +70,50 @@ Error RALocalAllocator::makeInitialAssignment() noexcept {
       VirtReg* virtReg = func->arg(i);
       if (!virtReg) continue;
 
-      // Unused argument.
+      // Unreferenced argument.
       RAWorkReg* workReg = virtReg->workReg();
       if (!workReg) continue;
 
+      // Overwritten argument.
       uint32_t workId = workReg->workId();
-      if (liveIn.bitAt(workId)) {
-        uint32_t group = workReg->group();
-        if (_curAssignment.workToPhysId(group, workId) != RAAssignment::kPhysNone)
-          continue;
+      if (!liveIn.bitAt(workId))
+        continue;
 
-        uint32_t allocableRegs = _availableRegs[group] & ~_curAssignment.assigned(group);
-        if (iter == 0) {
-          workReg->setArgIndex(i);
+      uint32_t group = workReg->group();
+      if (_curAssignment.workToPhysId(group, workId) != RAAssignment::kPhysNone)
+        continue;
 
-          // First iteration: Try to allocate to HomeId.
-          if (workReg->hasHomeId()) {
-            uint32_t physId = workReg->homeId();
-            if (Support::bitTest(allocableRegs, physId)) {
-              _curAssignment.assign(group, workId, physId, true);
-              _pass->_argsAssignment.assignReg(i, workReg->info().type(), physId, workReg->typeId());
-              continue;
-            }
-          }
-
-          numIter = 2;
-        }
-        else {
-          // Second iteration: Pick any other register if the is an unassigned one or assign to stack.
-          if (allocableRegs) {
-            uint32_t physId = Support::ctz(allocableRegs);
+      uint32_t allocableRegs = _availableRegs[group] & ~_curAssignment.assigned(group);
+      if (iter == 0) {
+        // First iteration: Try to allocate to home RegId.
+        if (workReg->hasHomeRegId()) {
+          uint32_t physId = workReg->homeRegId();
+          if (Support::bitTest(allocableRegs, physId)) {
             _curAssignment.assign(group, workId, physId, true);
             _pass->_argsAssignment.assignReg(i, workReg->info().type(), physId, workReg->typeId());
+            continue;
           }
-          else {
-            // This register will definitely need stack, create the slot now and assign also `argIndex`
-            // to it. We will patch `_argsAssignment` later after RAStackAllocator finishes.
-            RAStackSlot* slot = _pass->getOrCreateStackSlot(workReg);
-            if (ASMJIT_UNLIKELY(!slot))
-              return DebugUtils::errored(kErrorNoHeapMemory);
+        }
 
-            // This means STACK_ARG may be moved to STACK.
-            workReg->addFlags(RAWorkReg::kFlagStackArgToStack);
-            _pass->_numStackArgsToStackSlots++;
-          }
+        numIter = 2;
+      }
+      else {
+        // Second iteration: Pick any other register if the is an unassigned one or assign to stack.
+        if (allocableRegs) {
+          uint32_t physId = Support::ctz(allocableRegs);
+          _curAssignment.assign(group, workId, physId, true);
+          _pass->_argsAssignment.assignReg(i, workReg->info().type(), physId, workReg->typeId());
+        }
+        else {
+          // This register will definitely need stack, create the slot now and assign also `argIndex`
+          // to it. We will patch `_argsAssignment` later after RAStackAllocator finishes.
+          RAStackSlot* slot = _pass->getOrCreateStackSlot(workReg);
+          if (ASMJIT_UNLIKELY(!slot))
+            return DebugUtils::errored(kErrorOutOfMemory);
+
+          // This means STACK_ARG may be moved to STACK.
+          workReg->addFlags(RAWorkReg::kFlagStackArgToStack);
+          _pass->_numStackArgsToStackSlots++;
         }
       }
     }
@@ -175,9 +183,12 @@ Error RALocalAllocator::switchToAssignment(
     //   - Build `willLoadRegs` mask of registers scheduled for `onLoadReg()`.
     // ------------------------------------------------------------------------
 
-    int32_t runId = -1;                             // Current run-id (1 means more aggressive decisions).
-    uint32_t willLoadRegs = 0;                      // Remaining registers scheduled for `onLoadReg()`.
-    uint32_t affectedRegs = dst.assigned(group);    // Remaining registers to be allocated in this loop.
+    // Current run-id (1 means more aggressive decisions).
+    int32_t runId = -1;
+    // Remaining registers scheduled for `onLoadReg()`.
+    uint32_t willLoadRegs = 0;
+    // Remaining registers to be allocated in this loop.
+    uint32_t affectedRegs = dst.assigned(group);
 
     while (affectedRegs) {
       if (++runId == 2) {
@@ -191,7 +202,7 @@ Error RALocalAllocator::switchToAssignment(
       Support::BitWordIterator<uint32_t> it(affectedRegs);
       while (it.hasNext()) {
         uint32_t physId = it.next();
-        uint32_t physMask = Support::mask(physId);
+        uint32_t physMask = Support::bitMask(physId);
 
         uint32_t curWorkId = cur.physToWorkId(group, physId);
         uint32_t dstWorkId = dst.physToWorkId(group, physId);
@@ -233,7 +244,7 @@ Error RALocalAllocator::switchToAssignment(
                   uint32_t tmpPhysId = Support::ctz(allocableRegs);
 
                   ASMJIT_PROPAGATE(onMoveReg(group, curWorkId, tmpPhysId, physId));
-                  _pass->_clobberedRegs[group] |= Support::mask(tmpPhysId);
+                  _pass->_clobberedRegs[group] |= Support::bitMask(tmpPhysId);
                 }
                 else {
                   // MOVE is impossible, must SPILL.
@@ -319,7 +330,7 @@ Cleared:
   }
 
   if (!tryMode) {
-    // In case something fails here is code that dumps the conflicting part:
+    // Hre is a code that dumps the conflicting part if something fails here:
     //   if (!dst.equals(cur)) {
     //     uint32_t physTotal = dst._layout.physTotal;
     //     uint32_t workCount = dst._layout.workCount;
@@ -328,14 +339,14 @@ Cleared:
     //       uint32_t dstWorkId = dst._physToWorkMap->workIds[physId];
     //       uint32_t curWorkId = cur._physToWorkMap->workIds[physId];
     //       if (dstWorkId != curWorkId)
-    //         std::fprintf(stderr, "[PhysIdWork] PhysId=%u WorkId[DST(%u) != CUR(%u)]\n", physId, dstWorkId, curWorkId);
+    //         fprintf(stderr, "[PhysIdWork] PhysId=%u WorkId[DST(%u) != CUR(%u)]\n", physId, dstWorkId, curWorkId);
     //     }
     //
     //     for (uint32_t workId = 0; workId < workCount; workId++) {
     //       uint32_t dstPhysId = dst._workToPhysMap->physIds[workId];
     //       uint32_t curPhysId = cur._workToPhysMap->physIds[workId];
     //       if (dstPhysId != curPhysId)
-    //         std::fprintf(stderr, "[WorkToPhys] WorkId=%u PhysId[DST(%u) != CUR(%u)]\n", workId, dstPhysId, curPhysId);
+    //         fprintf(stderr, "[WorkToPhys] WorkId=%u PhysId[DST(%u) != CUR(%u)]\n", workId, dstPhysId, curPhysId);
     //     }
     //   }
     ASMJIT_ASSERT(dst.equals(cur));
@@ -351,6 +362,9 @@ Cleared:
 Error RALocalAllocator::allocInst(InstNode* node) noexcept {
   RAInst* raInst = node->passData<RAInst>();
 
+  RATiedReg* outTiedRegs[Globals::kMaxPhysRegs];
+  RATiedReg* dupTiedRegs[Globals::kMaxPhysRegs];
+
   // The cursor must point to the previous instruction for a possible instruction insertion.
   _cc->_setCursor(node->prev());
 
@@ -359,19 +373,20 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
   _tiedTotal = raInst->_tiedTotal;
   _tiedCount = raInst->_tiedCount;
 
-  if (raInst->_tiedTotal == 0)
-    return kErrorOk;
+  // Whether we already replaced register operand with memory operand.
+  bool rmAllocated = false;
 
   for (uint32_t group = 0; group < BaseReg::kGroupVirt; group++) {
-    uint32_t willUse = _raInst->_usedRegs[group];
-    uint32_t willOut = _raInst->_clobberedRegs[group];
-    uint32_t willFree = 0;
-
     uint32_t i, count = this->tiedCount(group);
     RATiedReg* tiedRegs = this->tiedRegs(group);
 
+    uint32_t willUse = _raInst->_usedRegs[group];
+    uint32_t willOut = _raInst->_clobberedRegs[group];
+    uint32_t willFree = 0;
     uint32_t usePending = count;
-    uint32_t outPending = 0;
+
+    uint32_t outTiedCount = 0;
+    uint32_t dupTiedCount = 0;
 
     // ------------------------------------------------------------------------
     // STEP 1:
@@ -390,7 +405,11 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
       RATiedReg* tiedReg = &tiedRegs[i];
 
       // Add OUT and KILL to `outPending` for CLOBBERing and/or OUT assignment.
-      outPending += uint32_t(tiedReg->isOutOrKill());
+      if (tiedReg->isOutOrKill())
+        outTiedRegs[outTiedCount++] = tiedReg;
+
+      if (tiedReg->isDuplicate())
+        dupTiedRegs[dupTiedCount++] = tiedReg;
 
       if (!tiedReg->isUse()) {
         tiedReg->markUseDone();
@@ -403,7 +422,7 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
 
       if (tiedReg->hasUseId()) {
         // If the register has `useId` it means it can only be allocated in that register.
-        uint32_t useMask = Support::mask(tiedReg->useId());
+        uint32_t useMask = Support::bitMask(tiedReg->useId());
 
         // RAInstBuilder must have collected `usedRegs` on-the-fly.
         ASMJIT_ASSERT((willUse & useMask) != 0);
@@ -424,7 +443,7 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
         // Check if the register must be moved to `allocableRegs`.
         uint32_t allocableRegs = tiedReg->allocableRegs();
         if (assignedId != RAAssignment::kPhysNone) {
-          uint32_t assignedMask = Support::mask(assignedId);
+          uint32_t assignedMask = Support::bitMask(assignedId);
           if ((allocableRegs & ~willUse) & assignedMask) {
             tiedReg->setUseId(assignedId);
             tiedReg->markUseDone();
@@ -462,19 +481,41 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
         uint32_t workId = tiedReg->workId();
         uint32_t assignedId = _curAssignment.workToPhysId(group, workId);
 
+        // REG/MEM: Patch register operand to memory operand if not allocated.
+        if (!rmAllocated && tiedReg->hasUseRM()) {
+          if (assignedId == RAAssignment::kPhysNone && Support::isPowerOf2(tiedReg->useRewriteMask())) {
+            RAWorkReg* workReg = workRegById(tiedReg->workId());
+            uint32_t opIndex = Support::ctz(tiedReg->useRewriteMask()) / uint32_t(sizeof(Operand) / sizeof(uint32_t));
+            uint32_t rmSize = tiedReg->rmSize();
+
+            if (rmSize <= workReg->virtReg()->virtSize()) {
+              Operand& op = node->operands()[opIndex];
+              op = _pass->workRegAsMem(workReg);
+              op.as<BaseMem>().setSize(rmSize);
+              tiedReg->_useRewriteMask = 0;
+
+              tiedReg->markUseDone();
+              usePending--;
+
+              rmAllocated = true;
+              continue;
+            }
+          }
+        }
+
         if (!tiedReg->hasUseId()) {
           uint32_t allocableRegs = tiedReg->allocableRegs() & ~(willFree | willUse);
 
           // DECIDE where to assign the USE register.
           uint32_t useId = decideOnAssignment(group, workId, assignedId, allocableRegs);
-          uint32_t useMask = Support::mask(useId);
+          uint32_t useMask = Support::bitMask(useId);
 
           willUse |= useMask;
           willFree |= useMask & liveRegs;
           tiedReg->setUseId(useId);
 
           if (assignedId != RAAssignment::kPhysNone) {
-            uint32_t assignedMask = Support::mask(assignedId);
+            uint32_t assignedMask = Support::bitMask(assignedId);
 
             willFree |= assignedMask;
             liveRegs &= ~assignedMask;
@@ -528,7 +569,7 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
             uint32_t reassignedId = decideOnUnassignment(group, workId, assignedId, allocableRegs);
             if (reassignedId != RAAssignment::kPhysNone) {
               ASMJIT_PROPAGATE(onMoveReg(group, workId, reassignedId, assignedId));
-              allocableRegs ^= Support::mask(reassignedId);
+              allocableRegs ^= Support::bitMask(reassignedId);
               continue;
             }
           }
@@ -587,7 +628,7 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
               usePending--;
 
               // Double-hit.
-              RATiedReg* targetTiedReg = targetWorkReg->tiedReg();
+              RATiedReg* targetTiedReg = RALocal_findTiedRegByWorkId(tiedRegs, count, targetWorkReg->workId());
               if (targetTiedReg && targetTiedReg->useId() == thisPhysId) {
                 targetTiedReg->markUseDone();
                 if (targetTiedReg->isWrite())
@@ -635,10 +676,10 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
     // KILL registers marked as KILL/OUT.
     // ------------------------------------------------------------------------
 
-    if (outPending) {
-      for (i = 0; i < count; i++) {
-        RATiedReg* tiedReg = &tiedRegs[i];
-        if (!tiedReg->isOutOrKill()) continue;
+    uint32_t outPending = outTiedCount;
+    if (outTiedCount) {
+      for (i = 0; i < outTiedCount; i++) {
+        RATiedReg* tiedReg = outTiedRegs[i];
 
         uint32_t workId = tiedReg->workId();
         uint32_t physId = _curAssignment.workToPhysId(group, workId);
@@ -647,7 +688,7 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
         // immediately after OUT, which could mean the register is not assigned).
         if (physId != RAAssignment::kPhysNone) {
           ASMJIT_PROPAGATE(onKillReg(group, workId, physId));
-          willOut &= ~Support::mask(physId);
+          willOut &= ~Support::bitMask(physId);
         }
 
         // We still maintain number of pending registers for OUT assignment.
@@ -679,13 +720,33 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
     // ------------------------------------------------------------------------
     // STEP 7:
     //
+    // Duplication.
+    // ------------------------------------------------------------------------
+
+    for (i = 0; i < dupTiedCount; i++) {
+      RATiedReg* tiedReg = dupTiedRegs[i];
+      uint32_t workId = tiedReg->workId();
+      uint32_t srcId = tiedReg->useId();
+
+      Support::BitWordIterator<uint32_t> it(tiedReg->_allocableRegs);
+      while (it.hasNext()) {
+        uint32_t dstId = it.next();
+        if (dstId == srcId)
+          continue;
+        _pass->onEmitMove(workId, dstId, srcId);
+      }
+    }
+
+    // ------------------------------------------------------------------------
+    // STEP 8:
+    //
     // Assign OUT registers.
     // ------------------------------------------------------------------------
 
     if (outPending) {
       // Live registers, we need a separate variable (outside of `_curAssignment)
       // to hold these because of KILLed registers. If we KILL a register here it
-      // will go out from _curAssignment, but we cannot assign to it here.
+      // will go out from `_curAssignment`, but we cannot assign to it in here.
       uint32_t liveRegs = _curAssignment.assigned(group);
 
       // Must avoid as they have been already OUTed (added during the loop).
@@ -694,8 +755,8 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
       // Must avoid as they collide with already allocated ones.
       uint32_t avoidRegs = willUse & ~clobberedByInst;
 
-      for (i = 0; i < count; i++) {
-        RATiedReg* tiedReg = &tiedRegs[i];
+      for (i = 0; i < outTiedCount; i++) {
+        RATiedReg* tiedReg = outTiedRegs[i];
         if (!tiedReg->isOut()) continue;
 
         uint32_t workId = tiedReg->workId();
@@ -728,8 +789,8 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
         tiedReg->setOutId(physId);
         tiedReg->markOutDone();
 
-        outRegs  |=  Support::mask(physId);
-        liveRegs &= ~Support::mask(physId);
+        outRegs |= Support::bitMask(physId);
+        liveRegs &= ~Support::bitMask(physId);
         outPending--;
       }
 
@@ -738,6 +799,32 @@ Error RALocalAllocator::allocInst(InstNode* node) noexcept {
     }
 
     _clobberedRegs[group] |= clobberedByInst;
+  }
+
+  return kErrorOk;
+}
+
+Error RALocalAllocator::spillAfterAllocation(InstNode* node) noexcept {
+  // This is experimental feature that would spill registers that don't have
+  // home-id and are last in this basic block. This prevents saving these regs
+  // in other basic blocks and then restoring them (mostly relevant for loops).
+  RAInst* raInst = node->passData<RAInst>();
+  uint32_t count = raInst->tiedCount();
+
+  for (uint32_t i = 0; i < count; i++) {
+    RATiedReg* tiedReg = raInst->tiedAt(i);
+    if (tiedReg->isLast()) {
+      uint32_t workId = tiedReg->workId();
+      RAWorkReg* workReg = workRegById(workId);
+      if (!workReg->hasHomeRegId()) {
+        uint32_t group = workReg->group();
+        uint32_t assignedId = _curAssignment.workToPhysId(group, workId);
+        if (assignedId != RAAssignment::kPhysNone) {
+          _cc->_setCursor(node);
+          ASMJIT_PROPAGATE(onSpillReg(group, workId, assignedId));
+        }
+      }
+    }
   }
 
   return kErrorOk;
@@ -797,7 +884,7 @@ Error RALocalAllocator::allocBranch(InstNode* node, RABlock* target, RABlock* co
     }
 
     _cc->_setCursor(prevCursor);
-    _curAssignment.swapWith(_tmpAssignment);
+    _curAssignment.swap(_tmpAssignment);
   }
   else {
     ASMJIT_PROPAGATE(_pass->setBlockEntryAssignment(target, block(), _curAssignment));
@@ -818,8 +905,8 @@ uint32_t RALocalAllocator::decideOnAssignment(uint32_t group, uint32_t workId, u
   RAWorkReg* workReg = workRegById(workId);
 
   // HIGHEST PRIORITY: Home register id.
-  if (workReg->hasHomeId()) {
-    uint32_t homeId = workReg->homeId();
+  if (workReg->hasHomeRegId()) {
+    uint32_t homeId = workReg->homeRegId();
     if (Support::bitTest(allocableRegs, homeId))
       return homeId;
   }
@@ -883,5 +970,4 @@ uint32_t RALocalAllocator::decideOnSpillFor(uint32_t group, uint32_t workId, uin
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
-#endif // !ASMJIT_DISABLE_COMPILER
+#endif // !ASMJIT_NO_COMPILER

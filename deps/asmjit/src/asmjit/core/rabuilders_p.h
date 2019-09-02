@@ -1,22 +1,21 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_RABUILDERS_P_H
 #define _ASMJIT_CORE_RABUILDERS_P_H
 
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_COMPILER
+#ifndef ASMJIT_NO_COMPILER
 
-// [Dependencies]
 #include "../core/rapass_p.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_ra
+//! \cond INTERNAL
+//! \addtogroup asmjit_ra
 //! \{
 
 // ============================================================================
@@ -26,6 +25,17 @@ ASMJIT_BEGIN_NAMESPACE
 template<typename This>
 class RACFGBuilder {
 public:
+  RAPass* _pass;
+  BaseCompiler* _cc;
+  RABlock* _curBlock;
+  RABlock* _retBlock;
+
+  // NOTE: This is a bit hacky. There are some nodes which are processed twice
+  // (see `onBeforeCall()` and `onBeforeRet()`) as they can insert some nodes
+  // around them. Since we don't have any flags to mark these we just use their
+  // position that is [at that time] unassigned.
+  static constexpr uint32_t kNodePositionDidOnBefore = 0xFFFFFFFFu;
+
   inline RACFGBuilder(RAPass* pass) noexcept
     : _pass(pass),
       _cc(pass->cc()),
@@ -35,12 +45,13 @@ public:
   inline BaseCompiler* cc() const noexcept { return _cc; }
 
   Error run() noexcept {
-    ASMJIT_RA_LOG_INIT(
-      Logger* logger = _pass->debugLogger();
-      uint32_t flags = FormatOptions::kFlagPositions;
-      RABlock* lastPrintedBlock = nullptr;
-      StringBuilderTmp<512> sb;
-    );
+    #ifndef ASMJIT_NO_LOGGING
+    Logger* logger = _pass->debugLogger();
+    uint32_t flags = FormatOptions::kFlagPositions;
+    RABlock* lastPrintedBlock = nullptr;
+    StringTmp<512> sb;
+    #endif
+
     ASMJIT_RA_LOG_FORMAT("[RAPass::BuildCFG]\n");
 
     FuncNode* func = _pass->func();
@@ -49,13 +60,13 @@ public:
     // Create entry and exit blocks.
     _retBlock = _pass->newBlockOrExistingAt(func->exitNode(), &node);
     if (ASMJIT_UNLIKELY(!_retBlock))
-      return DebugUtils::errored(kErrorNoHeapMemory);
+      return DebugUtils::errored(kErrorOutOfMemory);
     ASMJIT_PROPAGATE(_pass->addExitBlock(_retBlock));
 
     if (node != func) {
       _curBlock = _pass->newBlock();
       if (ASMJIT_UNLIKELY(!_curBlock))
-        return DebugUtils::errored(kErrorNoHeapMemory);
+        return DebugUtils::errored(kErrorOutOfMemory);
     }
     else {
       // Function that has no code at all.
@@ -90,7 +101,7 @@ public:
 
     for (;;) {
       BaseNode* next = node->next();
-      ASMJIT_ASSERT(!node->hasPosition());
+      ASMJIT_ASSERT(node->position() == 0 || node->position() == kNodePositionDidOnBefore);
 
       if (node->isInst()) {
         if (ASMJIT_UNLIKELY(!_curBlock)) {
@@ -109,29 +120,62 @@ public:
           // these share the `InstNode` interface and contain operands.
           hasCode = true;
 
+          if (node->type() != BaseNode::kNodeInst) {
+            if (node->position() != kNodePositionDidOnBefore) {
+              // Call and Reg are complicated as they may insert some surrounding
+              // code around them. The simplest approach is to get the previous
+              // node, call the `onBefore()` handlers and then check whether
+              // anything changed and restart if so. By restart we mean that the
+              // current `node` would go back to the first possible inserted node
+              // by `onBeforeCall()` or `onBeforeRet()`.
+              BaseNode* prev = node->prev();
+              if (node->type() == BaseNode::kNodeFuncCall) {
+                ASMJIT_PROPAGATE(static_cast<This*>(this)->onBeforeCall(node->as<FuncCallNode>()));
+              }
+              else if (node->type() == BaseNode::kNodeFuncRet) {
+                ASMJIT_PROPAGATE(static_cast<This*>(this)->onBeforeRet(node->as<FuncRetNode>()));
+              }
+
+              if (prev != node->prev()) {
+                // If this was the first node in the block and something was
+                // inserted before it then we have to update the first block.
+                if (_curBlock->first() == node)
+                  _curBlock->setFirst(prev->next());
+
+                node->setPosition(kNodePositionDidOnBefore);
+                node = prev->next();
+
+                // `onBeforeCall()` and `onBeforeRet()` can only insert instructions.
+                ASMJIT_ASSERT(node->isInst());
+              }
+
+              // Necessary if something was inserted after `node`, but nothing before.
+              next = node->next();
+            }
+            else {
+              // Change the position back to its original value.
+              node->setPosition(0);
+            }
+          }
+
+          InstNode* inst = node->as<InstNode>();
           ASMJIT_RA_LOG_COMPLEX({
             sb.clear();
             Logging::formatNode(sb, flags, cc(), node);
             logger->logf("    %s\n", sb.data());
           });
 
-          InstNode* inst = node->as<InstNode>();
           uint32_t controlType = BaseInst::kControlNone;
-
           ib.reset();
           ASMJIT_PROPAGATE(static_cast<This*>(this)->onInst(inst, controlType, ib));
 
-          uint32_t nodeType = inst->type();
-          if (nodeType != BaseNode::kNodeInst) {
-            if (nodeType == BaseNode::kNodeFuncCall) {
+          if (node->type() != BaseNode::kNodeInst) {
+            if (node->type() == BaseNode::kNodeFuncCall) {
               ASMJIT_PROPAGATE(static_cast<This*>(this)->onCall(inst->as<FuncCallNode>(), ib));
             }
-            else if (nodeType == BaseNode::kNodeFuncRet) {
+            else if (node->type() == BaseNode::kNodeFuncRet) {
               ASMJIT_PROPAGATE(static_cast<This*>(this)->onRet(inst->as<FuncRetNode>(), ib));
               controlType = BaseInst::kControlReturn;
-            }
-            else {
-              return DebugUtils::errored(kErrorInvalidInstruction);
             }
           }
 
@@ -141,26 +185,29 @@ public:
           if (controlType != BaseInst::kControlNone) {
             // Support for conditional and unconditional jumps.
             if (controlType == BaseInst::kControlJump || controlType == BaseInst::kControlBranch) {
-              // Jmp/Jcc/Call/Loop/etc...
-              uint32_t opCount = inst->opCount();
-              const Operand* opArray = inst->operands();
-
-              // The last operand must be label (this supports also instructions
-              // like jecx in explicit form).
-              if (ASMJIT_UNLIKELY(opCount == 0 || !opArray[opCount - 1].isLabel()))
-                return DebugUtils::errored(kErrorInvalidState);
-
-              LabelNode* cbLabel;
-              ASMJIT_PROPAGATE(cc()->labelNodeOf(&cbLabel, opArray[opCount - 1].as<Label>()));
-
-              RABlock* targetBlock = _pass->newBlockOrExistingAt(cbLabel);
-              if (ASMJIT_UNLIKELY(!targetBlock))
-                return DebugUtils::errored(kErrorNoHeapMemory);
-
               _curBlock->setLast(node);
               _curBlock->addFlags(RABlock::kFlagHasTerminator);
               _curBlock->makeConstructed(blockRegStats);
-              ASMJIT_PROPAGATE(_curBlock->appendSuccessor(targetBlock));
+
+              if (!(inst->instOptions() & BaseInst::kOptionUnfollow)) {
+                // Jmp/Jcc/Call/Loop/etc...
+                uint32_t opCount = inst->opCount();
+                const Operand* opArray = inst->operands();
+
+                // The last operand must be label (this supports also instructions
+                // like jecx in explicit form).
+                if (ASMJIT_UNLIKELY(opCount == 0 || !opArray[opCount - 1].isLabel()))
+                  return DebugUtils::errored(kErrorInvalidState);
+
+                LabelNode* cbLabel;
+                ASMJIT_PROPAGATE(cc()->labelNodeOf(&cbLabel, opArray[opCount - 1].as<Label>()));
+
+                RABlock* targetBlock = _pass->newBlockOrExistingAt(cbLabel);
+                if (ASMJIT_UNLIKELY(!targetBlock))
+                  return DebugUtils::errored(kErrorOutOfMemory);
+
+                ASMJIT_PROPAGATE(_curBlock->appendSuccessor(targetBlock));
+              }
 
               if (controlType == BaseInst::kControlJump) {
                 // Unconditional jump makes the code after the jump unreachable,
@@ -184,14 +231,14 @@ public:
                   else {
                     consecutiveBlock = _pass->newBlock(node);
                     if (ASMJIT_UNLIKELY(!consecutiveBlock))
-                      return DebugUtils::errored(kErrorNoHeapMemory);
+                      return DebugUtils::errored(kErrorOutOfMemory);
                     node->setPassData<RABlock>(consecutiveBlock);
                   }
                 }
                 else {
                   consecutiveBlock = _pass->newBlock(node);
                   if (ASMJIT_UNLIKELY(!consecutiveBlock))
-                    return DebugUtils::errored(kErrorNoHeapMemory);
+                    return DebugUtils::errored(kErrorOutOfMemory);
                 }
 
                 _curBlock->addFlags(RABlock::kFlagHasConsecutive);
@@ -238,7 +285,7 @@ public:
             // No block assigned, to create a new one, and assign it.
             _curBlock = _pass->newBlock(node);
             if (ASMJIT_UNLIKELY(!_curBlock))
-              return DebugUtils::errored(kErrorNoHeapMemory);
+              return DebugUtils::errored(kErrorOutOfMemory);
             node->setPassData<RABlock>(_curBlock);
           }
 
@@ -285,7 +332,7 @@ public:
 
               RABlock* consecutive = _pass->newBlock(node);
               if (ASMJIT_UNLIKELY(!consecutive))
-                return DebugUtils::errored(kErrorNoHeapMemory);
+                return DebugUtils::errored(kErrorOutOfMemory);
 
               ASMJIT_PROPAGATE(_curBlock->appendSuccessor(consecutive));
               ASMJIT_PROPAGATE(_pass->addBlock(consecutive));
@@ -362,17 +409,12 @@ public:
 
     return kErrorOk;
   }
-
-  RAPass* _pass;
-  BaseCompiler* _cc;
-  RABlock* _curBlock;
-  RABlock* _retBlock;
 };
 
 //! \}
+//! \endcond
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
-#endif // !ASMJIT_DISABLE_COMPILER
+#endif // !ASMJIT_NO_COMPILER
 #endif // _ASMJIT_CORE_RABUILDERS_P_H

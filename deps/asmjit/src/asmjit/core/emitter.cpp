@@ -1,19 +1,17 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
 #include "../core/logging.h"
 #include "../core/support.h"
 
 #ifdef ASMJIT_BUILD_X86
   #include "../x86/x86internal_p.h"
-  #include "../x86/x86instdb.h"
+  #include "../x86/x86instdb_p.h"
 #endif // ASMJIT_BUILD_X86
 
 #ifdef ASMJIT_BUILD_ARM
@@ -31,11 +29,11 @@ BaseEmitter::BaseEmitter(uint32_t type) noexcept
   : _type(uint8_t(type)),
     _reserved(0),
     _flags(0),
+    _emitterOptions(0),
     _code(nullptr),
     _errorHandler(nullptr),
     _codeInfo(),
     _gpRegInfo(),
-    _emitterOptions(0),
     _privateData(0),
     _instOptions(0),
     _globalInstOptions(BaseInst::kOptionReserved),
@@ -74,7 +72,7 @@ Error BaseEmitter::_emitOpArray(uint32_t instId, const Operand_* operands, size_
 // ============================================================================
 
 Label BaseEmitter::labelByName(const char* name, size_t nameSize, uint32_t parentId) noexcept {
-  return Label(_code ? _code->labelIdByName(name, nameSize, parentId) : uint32_t(0));
+  return Label(_code ? _code->labelIdByName(name, nameSize, parentId) : uint32_t(Globals::kInvalidId));
 }
 
 // ============================================================================
@@ -110,9 +108,8 @@ Error BaseEmitter::reportError(Error err, const char* message) {
 // [asmjit::BaseEmitter - Label Management]
 // ============================================================================
 
-bool BaseEmitter::isLabelValid(uint32_t id) const noexcept {
-  uint32_t index = Operand::unpackId(id);
-  return _code && index < _code->labelCount();
+bool BaseEmitter::isLabelValid(uint32_t labelId) const noexcept {
+  return _code && labelId < _code->labelCount();
 }
 
 // ============================================================================
@@ -178,12 +175,12 @@ Error BaseEmitter::commentf(const char* fmt, ...) {
   if (ASMJIT_UNLIKELY(!_code))
     return DebugUtils::errored(kErrorNotInitialized);
 
-  #ifndef ASMJIT_DISABLE_LOGGING
-  StringBuilderTmp<1024> sb;
+  #ifndef ASMJIT_NO_LOGGING
+  StringTmp<1024> sb;
 
-  std::va_list ap;
+  va_list ap;
   va_start(ap, fmt);
-  Error err = sb.appendFormatVA(fmt, ap);
+  Error err = sb.appendVFormat(fmt, ap);
   va_end(ap);
 
   if (ASMJIT_UNLIKELY(err))
@@ -196,14 +193,14 @@ Error BaseEmitter::commentf(const char* fmt, ...) {
   #endif
 }
 
-Error BaseEmitter::commentv(const char* fmt, std::va_list ap) {
+Error BaseEmitter::commentv(const char* fmt, va_list ap) {
   if (ASMJIT_UNLIKELY(!_code))
     return DebugUtils::errored(kErrorNotInitialized);
 
-  #ifndef ASMJIT_DISABLE_LOGGING
-  StringBuilderTmp<1024> sb;
+  #ifndef ASMJIT_NO_LOGGING
+  StringTmp<1024> sb;
 
-  Error err = sb.appendFormatVA(fmt, ap);
+  Error err = sb.appendVFormat(fmt, ap);
   if (ASMJIT_UNLIKELY(err))
     return err;
 
@@ -232,12 +229,11 @@ Error BaseEmitter::onDetach(CodeHolder* code) noexcept {
   ASMJIT_UNUSED(code);
 
   _flags = 0;
+  _emitterOptions = 0;
   _errorHandler = nullptr;
 
   _codeInfo.reset();
   _gpRegInfo.reset();
-
-  _emitterOptions = 0;
   _privateData = 0;
 
   _instOptions = 0;

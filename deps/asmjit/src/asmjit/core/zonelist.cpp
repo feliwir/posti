@@ -1,13 +1,11 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
 #include "../core/zone.h"
 #include "../core/zonelist.h"
 
@@ -17,10 +15,10 @@ ASMJIT_BEGIN_NAMESPACE
 // [asmjit::ZoneList - Unit]
 // ============================================================================
 
-#if defined(ASMJIT_BUILD_TEST)
+#if defined(ASMJIT_TEST)
 class MyListNode : public ZoneListNode<MyListNode> {};
 
-UNIT(asmjit_core_zone_list) {
+UNIT(asmjit_zone_list) {
   Zone zone(4096);
   ZoneList<MyListNode> list;
 

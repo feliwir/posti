@@ -1,27 +1,27 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_ZONEVECTOR_H
 #define _ASMJIT_CORE_ZONEVECTOR_H
 
-// [Dependencies]
 #include "../core/support.h"
 #include "../core/zone.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_support
+//! \addtogroup asmjit_zone
 //! \{
 
 // ============================================================================
 // [asmjit::ZoneVectorBase]
 // ============================================================================
 
-//! \internal
+//! \cond INTERNAL
+
+//! Base class implementing core `ZoneVector<>` functionality.
 class ZoneVectorBase {
 public:
   ASMJIT_NONCOPYABLE(ZoneVectorBase)
@@ -30,12 +30,18 @@ public:
   typedef uint32_t size_type;
   typedef ptrdiff_t difference_type;
 
-protected:
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! Vector data (untyped).
+  void* _data;
+  //! Size of the vector.
+  size_type _size;
+  //! Capacity of the vector.
+  size_type _capacity;
 
-  //! Create a new instance of `ZoneVectorBase`.
+protected:
+  //! \name Construction & Destruction
+  //! \{
+
+  //! Creates a new instance of `ZoneVectorBase`.
   inline ZoneVectorBase() noexcept
     : _data(nullptr),
       _size(0),
@@ -46,47 +52,12 @@ protected:
       _size(other._size),
       _capacity(other._capacity) {}
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
 
-public:
-  //! Get whether the vector is empty.
-  inline bool empty() const noexcept { return _size == 0; }
-  //! Get vector size.
-  inline size_type size() const noexcept { return _size; }
-  //! Get vector capacity.
-  inline size_type capacity() const noexcept { return _capacity; }
+  //! \cond INTERNAL
+  //! \name Internal
+  //! \{
 
-  // --------------------------------------------------------------------------
-  // [Ops]
-  // --------------------------------------------------------------------------
-
-  //! Makes the vector empty (won't change the capacity or data pointer).
-  inline void clear() noexcept { _size = 0; }
-  //! Reset the vector data and set its `size` to zero.
-  inline void reset() noexcept {
-    _data = nullptr;
-    _size = 0;
-    _capacity = 0;
-  }
-
-  //! Truncate the vector to at most `n` items.
-  inline void truncate(size_type n) noexcept {
-    _size = std::min(_size, n);
-  }
-
-  //! Set size of the vector to `n`. Used internally by some algorithms.
-  inline void _setSize(size_type n) noexcept {
-    ASMJIT_ASSERT(n <= _capacity);
-    _size = n;
-  }
-
-  // --------------------------------------------------------------------------
-  // [Memory Management]
-  // --------------------------------------------------------------------------
-
-protected:
   inline void _release(ZoneAllocator* allocator, uint32_t sizeOfT) noexcept {
     if (_data != nullptr) {
       allocator->release(_data, _capacity * sizeOfT);
@@ -98,25 +69,54 @@ protected:
   ASMJIT_API Error _resize(ZoneAllocator* allocator, uint32_t sizeOfT, uint32_t n) noexcept;
   ASMJIT_API Error _reserve(ZoneAllocator* allocator, uint32_t sizeOfT, uint32_t n) noexcept;
 
-  // --------------------------------------------------------------------------
-  // [Swap]
-  // --------------------------------------------------------------------------
-
-  inline void swapWith(ZoneVectorBase& other) noexcept {
+  inline void _swap(ZoneVectorBase& other) noexcept {
     std::swap(_data, other._data);
     std::swap(_size, other._size);
     std::swap(_capacity, other._capacity);
   }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
+  //! \}
 
 public:
-  void* _data;                           //!< Vector data (untyped).
-  size_type _size;                       //!< Size of the vector.
-  size_type _capacity;                   //!< Capacity of the vector.
+  //! \name Accessors
+  //! \{
+
+  //! Tests whether the vector is empty.
+  inline bool empty() const noexcept { return _size == 0; }
+  //! Returns the vector size.
+  inline size_type size() const noexcept { return _size; }
+  //! Returns the vector capacity.
+  inline size_type capacity() const noexcept { return _capacity; }
+
+  //! \}
+
+  //! \name Utilities
+  //! \{
+
+  //! Makes the vector empty (won't change the capacity or data pointer).
+  inline void clear() noexcept { _size = 0; }
+  //! Resets the vector data and set its `size` to zero.
+  inline void reset() noexcept {
+    _data = nullptr;
+    _size = 0;
+    _capacity = 0;
+  }
+
+  //! Truncates the vector to at most `n` items.
+  inline void truncate(size_type n) noexcept {
+    _size = Support::min(_size, n);
+  }
+
+  //! Sets size of the vector to `n`. Used internally by some algorithms.
+  inline void _setSize(size_type n) noexcept {
+    ASMJIT_ASSERT(n <= _capacity);
+    _size = n;
+  }
+
+  //! \}
 };
+
+//! \endcond
 
 // ============================================================================
 // [asmjit::ZoneVector<T>]
@@ -126,9 +126,9 @@ public:
 //!
 //! This template has these advantages over other std::vector<>:
 //! - Always non-copyable (designed to be non-copyable, we want it).
-//! - No copy-on-write (some implementations of STL can use it).
 //! - Optimized for working only with POD types.
-//! - Uses ZoneAllocator, thus small vectors are basically for free.
+//! - Uses ZoneAllocator, thus small vectors are almost for free.
+//! - Explicit allocation, ZoneAllocator is not part of the data.
 template <typename T>
 class ZoneVector : public ZoneVectorBase {
 public:
@@ -146,23 +146,23 @@ public:
   typedef Support::ReverseIterator<T> reverse_iterator;
   typedef Support::ReverseIterator<const T> const_reverse_iterator;
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! \name Construction & Destruction
+  //! \{
 
   inline ZoneVector() noexcept : ZoneVectorBase() {}
   inline ZoneVector(ZoneVector&& other) noexcept : ZoneVector(other) {}
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Get data.
+  //! \name Accessors
+  //! \{
+
+  //! Returns vector data.
   inline T* data() noexcept { return static_cast<T*>(_data); }
-  //! \overload
+  //! Returns vector data (const)
   inline const T* data() const noexcept { return static_cast<const T*>(_data); }
 
-  //! Get item at index `i` (const).
+  //! Returns item at the given index `i` (const).
   inline const T& at(uint32_t i) const noexcept {
     ASMJIT_ASSERT(i < _size);
     return data()[i];
@@ -173,11 +173,11 @@ public:
     _setSize(uint32_t((uintptr_t)(p - data())));
   }
 
-  // --------------------------------------------------------------------------
-  // [Iterators]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  // STL compatibility.
+  //! \name STL Compatibility (Iterators)
+  //! \{
+
   inline iterator begin() noexcept { return iterator(data()); };
   inline const_iterator begin() const noexcept { return const_iterator(data()); };
 
@@ -196,23 +196,27 @@ public:
   inline const_reverse_iterator crbegin() const noexcept { return const_reverse_iterator(data()); };
   inline const_reverse_iterator crend() const noexcept { return const_reverse_iterator(data() + _size); };
 
-  // --------------------------------------------------------------------------
-  // [Operations]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Prepend `item` to the vector.
+  //! \name Utilities
+  //! \{
+
+  //! Swaps this vector with `other`.
+  inline void swap(ZoneVector<T>& other) noexcept { _swap(other); }
+
+  //! Prepends `item` to the vector.
   inline Error prepend(ZoneAllocator* allocator, const T& item) noexcept {
     if (ASMJIT_UNLIKELY(_size == _capacity))
       ASMJIT_PROPAGATE(grow(allocator, 1));
 
-    std::memmove(static_cast<T*>(_data) + 1, _data, size_t(_size) * sizeof(T));
-    std::memcpy(_data, &item, sizeof(T));
+    ::memmove(static_cast<T*>(_data) + 1, _data, size_t(_size) * sizeof(T));
+    memcpy(_data, &item, sizeof(T));
 
     _size++;
     return kErrorOk;
   }
 
-  //! Insert an `item` at the specified `index`.
+  //! Inserts an `item` at the specified `index`.
   inline Error insert(ZoneAllocator* allocator, uint32_t index, const T& item) noexcept {
     ASMJIT_ASSERT(index <= _size);
 
@@ -220,19 +224,19 @@ public:
       ASMJIT_PROPAGATE(grow(allocator, 1));
 
     T* dst = static_cast<T*>(_data) + index;
-    std::memmove(dst + 1, dst, size_t(_size - index) * sizeof(T));
-    std::memcpy(dst, &item, sizeof(T));
+    ::memmove(dst + 1, dst, size_t(_size - index) * sizeof(T));
+    memcpy(dst, &item, sizeof(T));
     _size++;
 
     return kErrorOk;
   }
 
-  //! Append `item` to the vector.
+  //! Appends `item` to the vector.
   inline Error append(ZoneAllocator* allocator, const T& item) noexcept {
     if (ASMJIT_UNLIKELY(_size == _capacity))
       ASMJIT_PROPAGATE(grow(allocator, 1));
 
-    std::memcpy(static_cast<T*>(_data) + _size, &item, sizeof(T));
+    memcpy(static_cast<T*>(_data) + _size, &item, sizeof(T));
     _size++;
 
     return kErrorOk;
@@ -244,14 +248,14 @@ public:
       ASMJIT_PROPAGATE(grow(allocator, size));
 
     if (size) {
-      std::memcpy(static_cast<T*>(_data) + _size, other._data, size_t(size) * sizeof(T));
+      memcpy(static_cast<T*>(_data) + _size, other._data, size_t(size) * sizeof(T));
       _size += size;
     }
 
     return kErrorOk;
   }
 
-  //! Prepend `item` to the vector (unsafe case).
+  //! Prepends `item` to the vector (unsafe case).
   //!
   //! Can only be used together with `willGrow()`. If `willGrow(N)` returns
   //! `kErrorOk` then N elements can be added to the vector without checking
@@ -261,13 +265,13 @@ public:
     T* data = static_cast<T*>(_data);
 
     if (_size)
-      std::memmove(data + 1, data, size_t(_size) * sizeof(T));
+      ::memmove(data + 1, data, size_t(_size) * sizeof(T));
 
-    std::memcpy(data, &item, sizeof(T));
+    memcpy(data, &item, sizeof(T));
     _size++;
   }
 
-  //! Append `item` to the vector (unsafe case).
+  //! Append s`item` to the vector (unsafe case).
   //!
   //! Can only be used together with `willGrow()`. If `willGrow(N)` returns
   //! `kErrorOk` then N elements can be added to the vector without checking
@@ -275,22 +279,22 @@ public:
   inline void appendUnsafe(const T& item) noexcept {
     ASMJIT_ASSERT(_size < _capacity);
 
-    std::memcpy(static_cast<T*>(_data) + _size, &item, sizeof(T));
+    memcpy(static_cast<T*>(_data) + _size, &item, sizeof(T));
     _size++;
   }
 
-  //! Concatenate all items of `other` at the end of the vector.
+  //! Concatenates all items of `other` at the end of the vector.
   inline void concatUnsafe(const ZoneVector<T>& other) noexcept {
     uint32_t size = other._size;
     ASMJIT_ASSERT(_capacity - _size >= size);
 
     if (size) {
-      std::memcpy(static_cast<T*>(_data) + _size, other._data, size_t(size) * sizeof(T));
+      memcpy(static_cast<T*>(_data) + _size, other._data, size_t(size) * sizeof(T));
       _size += size;
     }
   }
 
-  //! Get index of `val` or `Globals::kNotFound` if not found.
+  //! Returns index of the given `val` or `Globals::kNotFound` if it doesn't exist.
   inline uint32_t indexOf(const T& val) const noexcept {
     const T* data = static_cast<const T*>(_data);
     uint32_t size = _size;
@@ -301,12 +305,12 @@ public:
     return Globals::kNotFound;
   }
 
-  //! Get whether the vector contains `val`.
+  //! Tests whether the vector contains `val`.
   inline bool contains(const T& val) const noexcept {
     return indexOf(val) != Globals::kNotFound;
   }
 
-  //! Remove item at index `i`.
+  //! Removes item at index `i`.
   inline void removeAt(uint32_t i) noexcept {
     ASMJIT_ASSERT(i < _size);
 
@@ -314,7 +318,7 @@ public:
     uint32_t size = --_size - i;
 
     if (size)
-      std::memmove(data, data + 1, size_t(size) * sizeof(T));
+      ::memmove(data, data + 1, size_t(size) * sizeof(T));
   }
 
   inline T pop() noexcept {
@@ -324,25 +328,18 @@ public:
     return data()[index];
   }
 
-  //! Swap this pod-vector with `other`.
-  inline void swap(ZoneVector<T>& other) noexcept {
-    std::swap(_size, other._size);
-    std::swap(_capacity, other._capacity);
-    std::swap(_data, other._data);
-  }
-
   template<typename CompareT = Support::Compare<Support::kSortAscending>>
   inline void sort(const CompareT& cmp = CompareT()) noexcept {
     Support::qSort<T, CompareT>(data(), size(), cmp);
   }
 
-  //! Get item at index `i`.
+  //! Returns item at index `i`.
   inline T& operator[](uint32_t i) noexcept {
     ASMJIT_ASSERT(i < _size);
     return data()[i];
   }
 
-  //! Get item at index `i`.
+  //! Returns item at index `i`.
   inline const T& operator[](uint32_t i) const noexcept {
     ASMJIT_ASSERT(i < _size);
     return data()[i];
@@ -354,11 +351,12 @@ public:
   inline T& last() noexcept { return operator[](_size - 1); }
   inline const T& last() const noexcept { return operator[](_size - 1); }
 
-  // --------------------------------------------------------------------------
-  // [Memory Management]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Release the memory held by `ZoneVector<T>` back to the `allocator`.
+  //! \name Memory Management
+  //! \{
+
+  //! Releases the memory held by `ZoneVector<T>` back to the `allocator`.
   inline void release(ZoneAllocator* allocator) noexcept {
     _release(allocator, sizeof(T));
   }
@@ -368,7 +366,7 @@ public:
     return ZoneVectorBase::_grow(allocator, sizeof(T), n);
   }
 
-  //! Resize the vector to hold `n` elements.
+  //! Resizes the vector to hold `n` elements.
   //!
   //! If `n` is greater than the current size then the additional elements'
   //! content will be initialized to zero. If `n` is less than the current
@@ -377,7 +375,7 @@ public:
     return ZoneVectorBase::_resize(allocator, sizeof(T), n);
   }
 
-  //! Realloc internal array to fit at least `n` items.
+  //! Reallocates the internal array to fit at least `n` items.
   inline Error reserve(ZoneAllocator* allocator, uint32_t n) noexcept {
     return n > _capacity ? ZoneVectorBase::_reserve(allocator, sizeof(T), n) : Error(kErrorOk);
   }
@@ -386,13 +384,7 @@ public:
     return _capacity - _size < n ? grow(allocator, n) : Error(kErrorOk);
   }
 
-  // --------------------------------------------------------------------------
-  // [Swap]
-  // --------------------------------------------------------------------------
-
-  inline void swapWith(ZoneVector<T>& other) noexcept {
-    ZoneVectorBase::swapWith(other);
-  }
+  //! \}
 };
 
 // ============================================================================
@@ -401,10 +393,21 @@ public:
 
 class ZoneBitVector {
 public:
-  ASMJIT_NONCOPYABLE(ZoneBitVector)
-
   typedef Support::BitWord BitWord;
   static constexpr uint32_t kBitWordSizeInBits = Support::kBitWordSizeInBits;
+
+  //! Bits.
+  BitWord* _data;
+  //! Size of the bit-vector (in bits).
+  uint32_t _size;
+  //! Capacity of the bit-vector (in bits).
+  uint32_t _capacity;
+
+  ASMJIT_NONCOPYABLE(ZoneBitVector)
+
+  //! \cond INTERNAL
+  //! \name Internal
+  //! \{
 
   static inline uint32_t _wordsPerBits(uint32_t nBits) noexcept {
     return ((nBits + kBitWordSizeInBits - 1) / kBitWordSizeInBits);
@@ -425,9 +428,11 @@ public:
       dst[i] = src[i];
   }
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! \}
+  //! \endcond
+
+  //! \name Construction & Destruction
+  //! \{
 
   inline ZoneBitVector() noexcept
     : _data(nullptr),
@@ -439,30 +444,46 @@ public:
       _size(other._size),
       _capacity(other._capacity) {}
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Get whether the bit-vector is empty (has no bits).
+  //! \name Overloaded Operators
+  //! \{
+
+  inline bool operator==(const ZoneBitVector& other) const noexcept { return  eq(other); }
+  inline bool operator!=(const ZoneBitVector& other) const noexcept { return !eq(other); }
+
+  //! \}
+
+  //! \name Accessors
+  //! \{
+
+  //! Tests whether the bit-vector is empty (has no bits).
   inline bool empty() const noexcept { return _size == 0; }
-  //! Get a size of this bit-vector (in bits).
+  //! Returns the size of this bit-vector (in bits).
   inline uint32_t size() const noexcept { return _size; }
-  //! Get a capacity of this bit-vector (in bits).
+  //! Returns the capacity of this bit-vector (in bits).
   inline uint32_t capacity() const noexcept { return _capacity; }
 
-  //! Get a count of `BitWord[]` array need to store all bits.
+  //! Returns the size of the `BitWord[]` array in `BitWord` units.
   inline uint32_t sizeInBitWords() const noexcept { return _wordsPerBits(_size); }
-  //! Get a count of `BitWord[]` array need to store all bits.
+  //! Returns the capacity of the `BitWord[]` array in `BitWord` units.
   inline uint32_t capacityInBitWords() const noexcept { return _wordsPerBits(_capacity); }
 
-  //! Get data.
+  //! REturns bit-vector data as `BitWord[]`.
   inline BitWord* data() noexcept { return _data; }
   //! \overload
   inline const BitWord* data() const noexcept { return _data; }
 
-  // --------------------------------------------------------------------------
-  // [Operations]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Utilities
+  //! \{
+
+  inline void swap(ZoneBitVector& other) noexcept {
+    std::swap(_data, other._data);
+    std::swap(_size, other._size);
+    std::swap(_capacity, other._capacity);
+  }
 
   inline void clear() noexcept {
     _size = 0;
@@ -475,7 +496,7 @@ public:
   }
 
   inline void truncate(uint32_t newSize) noexcept {
-    _size = std::min(_size, newSize);
+    _size = Support::min(_size, newSize);
     _clearUnusedBits();
   }
 
@@ -536,18 +557,18 @@ public:
     Support::bitVectorFill(_data, start, count);
   }
 
-  //! Perform a logical bitwise AND between bits specified in this array and bits
+  //! Performs a logical bitwise AND between bits specified in this array and bits
   //! in `other`. If `other` has less bits than `this` then all remaining bits are
   //! set to zero.
   //!
-  //! NOTE: The size of the BitVector is unaffected by this operation.
+  //! \note The size of the BitVector is unaffected by this operation.
   inline void and_(const ZoneBitVector& other) noexcept {
     BitWord* dst = _data;
     const BitWord* src = other._data;
 
     uint32_t thisBitWordCount = sizeInBitWords();
     uint32_t otherBitWordCount = other.sizeInBitWords();
-    uint32_t commonBitWordCount = std::min(thisBitWordCount, otherBitWordCount);
+    uint32_t commonBitWordCount = Support::min(thisBitWordCount, otherBitWordCount);
 
     uint32_t i = 0;
     while (i < commonBitWordCount) {
@@ -561,30 +582,30 @@ public:
     }
   }
 
-  //! Perform a logical bitwise AND between bits specified in this array and
+  //! Performs a logical bitwise AND between bits specified in this array and
   //! negated bits in `other`. If `other` has less bits than `this` then all
   //! remaining bits are kept intact.
   //!
-  //! NOTE: The size of the BitVector is unaffected by this operation.
+  //! \note The size of the BitVector is unaffected by this operation.
   inline void andNot(const ZoneBitVector& other) noexcept {
     BitWord* dst = _data;
     const BitWord* src = other._data;
 
-    uint32_t commonBitWordCount = _wordsPerBits(std::min(_size, other._size));
+    uint32_t commonBitWordCount = _wordsPerBits(Support::min(_size, other._size));
     for (uint32_t i = 0; i < commonBitWordCount; i++)
       dst[i] = dst[i] & ~src[i];
   }
 
-  //! Perform a logical bitwise OP between bits specified in this array and bits
+  //! Performs a logical bitwise OP between bits specified in this array and bits
   //! in `other`. If `other` has less bits than `this` then all remaining bits
   //! are kept intact.
   //!
-  //! NOTE: The size of the BitVector is unaffected by this operation.
+  //! \note The size of the BitVector is unaffected by this operation.
   inline void or_(const ZoneBitVector& other) noexcept {
     BitWord* dst = _data;
     const BitWord* src = other._data;
 
-    uint32_t commonBitWordCount = _wordsPerBits(std::min(_size, other._size));
+    uint32_t commonBitWordCount = _wordsPerBits(Support::min(_size, other._size));
     for (uint32_t i = 0; i < commonBitWordCount; i++)
       dst[i] = dst[i] | src[i];
     _clearUnusedBits();
@@ -612,12 +633,10 @@ public:
     return true;
   }
 
-  inline bool operator==(const ZoneBitVector& other) const noexcept { return  eq(other); }
-  inline bool operator!=(const ZoneBitVector& other) const noexcept { return !eq(other); }
+  //! \}
 
-  // --------------------------------------------------------------------------
-  // [Memory Management]
-  // --------------------------------------------------------------------------
+  //! \name Memory Management
+  //! \{
 
   inline void release(ZoneAllocator* allocator) noexcept {
     if (!_data) return;
@@ -632,19 +651,10 @@ public:
   ASMJIT_API Error _resize(ZoneAllocator* allocator, uint32_t newSize, uint32_t idealCapacity, bool newBitsValue) noexcept;
   ASMJIT_API Error _append(ZoneAllocator* allocator, bool value) noexcept;
 
-  // --------------------------------------------------------------------------
-  // [Swap]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  inline void swapWith(ZoneBitVector& other) noexcept {
-    std::swap(_data, other._data);
-    std::swap(_size, other._size);
-    std::swap(_capacity, other._capacity);
-  }
-
-  // --------------------------------------------------------------------------
-  // [Iterators]
-  // --------------------------------------------------------------------------
+  //! \name Iterators
+  //! \{
 
   class ForEachBitSet : public Support::BitVectorIterator<BitWord> {
   public:
@@ -661,18 +671,12 @@ public:
     }
   };
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  BitWord* _data;                        //!< Bits.
-  uint32_t _size;                        //!< Size of the bit-vector (in bits).
-  uint32_t _capacity;                    //!< Capacity of the bit-vector (in bits).
 };
 
 //! \}
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
 #endif // _ASMJIT_CORE_ZONEVECTOR_H

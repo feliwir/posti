@@ -1,19 +1,18 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_ARCH_H
 #define _ASMJIT_CORE_ARCH_H
 
-// [Dependencies]
+#include "../core/globals.h"
 #include "../core/operand.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_api
+//! \addtogroup asmjit_core
 //! \{
 
 // ============================================================================
@@ -22,6 +21,21 @@ ASMJIT_BEGIN_NAMESPACE
 
 class ArchInfo {
 public:
+  union {
+    struct {
+      //! Architecture id.
+      uint8_t _id;
+      //! Architecture sub-id.
+      uint8_t _subId;
+      //! Default size of a general purpose register.
+      uint8_t _gpSize;
+      //! Count of all general purpose registers.
+      uint8_t _gpCount;
+    };
+    //! Architecture signature (32-bit int).
+    uint32_t _signature;
+  };
+
   //! Architecture id.
   enum Id : uint32_t {
     kIdNone  = 0,                        //!< No/Unknown architecture.
@@ -69,40 +83,40 @@ public:
     #endif
   };
 
-  // --------------------------------------------------------------------------
-  // [Utilities]
-  // --------------------------------------------------------------------------
-
-  static inline bool isX86Family(uint32_t archId) noexcept { return archId >= kIdX86 && archId <= kIdX64; }
-  static inline bool isArmFamily(uint32_t archId) noexcept { return archId >= kIdA32 && archId <= kIdA64; }
-
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! \name Construction & Destruction
+  //! \{
 
   inline ArchInfo() noexcept : _signature(0) {}
   inline ArchInfo(const ArchInfo& other) noexcept : _signature(other._signature) {}
   inline explicit ArchInfo(uint32_t type, uint32_t subType = kSubIdNone) noexcept { init(type, subType); }
+  inline explicit ArchInfo(Globals::NoInit_) noexcept {}
 
   inline static ArchInfo host() noexcept { return ArchInfo(kIdHost, kSubIdHost); }
-
-  // --------------------------------------------------------------------------
-  // [Init / Reset]
-  // --------------------------------------------------------------------------
 
   inline bool isInitialized() const noexcept { return _id != kIdNone; }
 
   ASMJIT_API void init(uint32_t type, uint32_t subType = kSubIdNone) noexcept;
   inline void reset() noexcept { _signature = 0; }
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Get architecture id, see `Id`.
+  //! \name Overloaded Operators
+  //! \{
+
+  inline ArchInfo& operator=(const ArchInfo& other) noexcept = default;
+
+  inline bool operator==(const ArchInfo& other) const noexcept { return _signature == other._signature; }
+  inline bool operator!=(const ArchInfo& other) const noexcept { return _signature != other._signature; }
+
+  //! \}
+
+  //! \name Accessors
+  //! \{
+
+  //! Returns the architecture id, see `Id`.
   inline uint32_t archId() const noexcept { return _id; }
 
-  //! Get architecture sub-type, see `SubType`.
+  //! Returns the architecture sub-id, see `SubType`.
   //!
   //! X86 & X64
   //! ---------
@@ -118,43 +132,30 @@ public:
   //! encoding or regular ARM encoding.
   inline uint32_t archSubId() const noexcept { return _subId; }
 
-  //! Get whether the architecture is 32-bit.
+  //! Tests whether this architecture is 32-bit.
   inline bool is32Bit() const noexcept { return _gpSize == 4; }
-  //! Get whether the architecture is 64-bit.
+  //! Tests whether this architecture is 64-bit.
   inline bool is64Bit() const noexcept { return _gpSize == 8; }
 
-  //! Get whether the architecture is X86, X64, or X32.
+  //! Tests whether this architecture is X86, X64.
   inline bool isX86Family() const noexcept { return isX86Family(_id); }
-  //! Get whether the architecture is ARM32 or ARM64.
+  //! Tests whether this architecture is ARM32 or ARM64.
   inline bool isArmFamily() const noexcept { return isArmFamily(_id); }
 
-  //! Get a size of a general-purpose register.
+  //! Returns the native size of a general-purpose register.
   inline uint32_t gpSize() const noexcept { return _gpSize; }
-  //! Get number of general-purpose registers.
+  //! Returns number of general-purpose registers.
   inline uint32_t gpCount() const noexcept { return _gpCount; }
 
-  // --------------------------------------------------------------------------
-  // [Operator Overload]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  inline ArchInfo& operator=(const ArchInfo& other) noexcept = default;
+  //! \name Static Functions
+  //! \{
 
-  inline bool operator==(const ArchInfo& other) const noexcept { return _signature == other._signature; }
-  inline bool operator!=(const ArchInfo& other) const noexcept { return _signature != other._signature; }
+  static inline bool isX86Family(uint32_t archId) noexcept { return archId >= kIdX86 && archId <= kIdX64; }
+  static inline bool isArmFamily(uint32_t archId) noexcept { return archId >= kIdA32 && archId <= kIdA64; }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  union {
-    struct {
-      uint8_t _id;                       //!< Architecture id.
-      uint8_t _subId;                    //!< Architecture sub-id.
-      uint8_t _gpSize;                   //!< Default size of a general purpose register.
-      uint8_t _gpCount;                  //!< Count of all general purpose registers.
-    };
-    uint32_t _signature;                 //!< Architecture signature (32-bit int).
-  };
+  //! \}
 };
 
 // ============================================================================
@@ -183,5 +184,4 @@ struct ArchUtils {
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
 #endif // _ASMJIT_CORE_ARCH_H

@@ -1,13 +1,11 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
 #include "../core/support.h"
 #include "../core/zone.h"
 #include "../core/zonetree.h"
@@ -18,7 +16,7 @@ ASMJIT_BEGIN_NAMESPACE
 // [asmjit::ZoneTree - Unit]
 // ============================================================================
 
-#if defined(ASMJIT_BUILD_TEST)
+#if defined(ASMJIT_TEST)
 template<typename NodeT>
 struct ZoneRBUnit {
   typedef ZoneTree<NodeT> Tree;
@@ -68,8 +66,8 @@ public:
   uint32_t _key;
 };
 
-UNIT(asmjit_core_zone_rbtree) {
-  constexpr uint32_t kCount = 10000;
+UNIT(asmjit_zone_rbtree) {
+  uint32_t kCount = BrokenAPI::hasArg("--quick") ? 1000 : 10000;
 
   Zone zone(4096);
   ZoneTree<MyRBNode> rbTree;

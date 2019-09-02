@@ -1,23 +1,21 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_LOGGING_H
 #define _ASMJIT_CORE_LOGGING_H
 
-// [Dependencies]
 #include "../core/inst.h"
-#include "../core/stringbuilder.h"
+#include "../core/string.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_api
+//! \addtogroup asmjit_core
 //! \{
 
-#ifndef ASMJIT_DISABLE_LOGGING
+#ifndef ASMJIT_NO_LOGGING
 
 // ============================================================================
 // [Forward Declarations]
@@ -28,7 +26,7 @@ class BaseReg;
 class Logger;
 struct Operand_;
 
-#ifndef ASMJIT_DISABLE_BUILDER
+#ifndef ASMJIT_NO_BUILDER
 class BaseBuilder;
 class BaseNode;
 #endif
@@ -39,29 +37,44 @@ class BaseNode;
 
 class FormatOptions {
 public:
+  uint32_t _flags;
+  uint8_t _indentation[4];
+
   enum Flags : uint32_t {
-    kFlagMachineCode      = 0x00000001u, //!< Show also binary form of each logged instruction (assembler).
-    kFlagExplainImms      = 0x00000002u, //!< Show a text explanation of some immediate values.
-    kFlagHexImms          = 0x00000004u, //!< Use hexadecimal notation of immediate values.
-    kFlagHexOffsets       = 0x00000008u, //!< Use hexadecimal notation of address offsets.
-    kFlagRegCasts         = 0x00000010u, //!< Show casts between virtual register types (compiler).
-    kFlagPositions        = 0x00000020u, //!< Show positions associated with nodes (compiler).
-    kFlagAnnotations      = 0x00000040u, //!< Annotate nodes that are lowered by passes.
+    //!< Show also binary form of each logged instruction (assembler).
+    kFlagMachineCode = 0x00000001u,
+    //!< Show a text explanation of some immediate values.
+    kFlagExplainImms = 0x00000002u,
+    //!< Use hexadecimal notation of immediate values.
+    kFlagHexImms = 0x00000004u,
+    //!< Use hexadecimal notation of address offsets.
+    kFlagHexOffsets = 0x00000008u,
+    //!< Show casts between virtual register types (compiler).
+    kFlagRegCasts = 0x00000010u,
+    //!< Show positions associated with nodes (compiler).
+    kFlagPositions = 0x00000020u,
+    //!< Annotate nodes that are lowered by passes.
+    kFlagAnnotations = 0x00000040u,
+
     // TODO: These must go, keep this only for formatting.
-    kFlagDebugPasses      = 0x00000080u, //!< Show an additional output from passes.
-    kFlagDebugRA          = 0x00000100u  //!< Show an additional output from RA.
+    //!< Show an additional output from passes.
+    kFlagDebugPasses = 0x00000080u,
+    //!< Show an additional output from RA.
+    kFlagDebugRA = 0x00000100u
   };
 
   enum IndentationType : uint32_t {
-    kIndentationCode      = 0u,          //!< Indentation used for instructions and directives.
-    kIndentationLabel     = 1u,          //!< Indentation used for labels and function nodes.
-    kIndentationComment   = 2u,          //!< Indentation used for comments (not inline comments).
-    kIndentationReserved  = 3u
+    //! Indentation used for instructions and directives.
+    kIndentationCode = 0u,
+    //! Indentation used for labels and function nodes.
+    kIndentationLabel = 1u,
+    //! Indentation used for comments (not inline comments).
+    kIndentationComment = 2u,
+    kIndentationReserved = 3u
   };
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! \name Construction & Destruction
+  //! \{
 
   constexpr FormatOptions() noexcept
     : _flags(0),
@@ -69,10 +82,6 @@ public:
 
   constexpr FormatOptions(const FormatOptions& other) noexcept = default;
   inline FormatOptions& operator=(const FormatOptions& other) noexcept = default;
-
-  // --------------------------------------------------------------------------
-  // [Reset]
-  // --------------------------------------------------------------------------
 
   inline void reset() noexcept {
     _flags = 0;
@@ -82,9 +91,10 @@ public:
     _indentation[3] = 0;
   }
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Accessors
+  //! \{
 
   constexpr uint32_t flags() const noexcept { return _flags; }
   constexpr bool hasFlag(uint32_t flag) const noexcept { return (_flags & flag) != 0; }
@@ -96,12 +106,7 @@ public:
   inline void setIndentation(uint32_t type, uint32_t n) noexcept { _indentation[type] = uint8_t(n); }
   inline void resetIndentation(uint32_t type) noexcept { _indentation[type] = uint8_t(0); }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  uint32_t _flags;
-  uint8_t _indentation[4];
+  //! \}
 };
 
 // ============================================================================
@@ -115,43 +120,28 @@ public:
 //! a custom stream.
 //!
 //! There are two `Logger` implementations offered by AsmJit:
-//!   - `FileLogger` - allows to log into `std::FILE*`.
-//!   - `StringLogger` - logs into a `StringBuilder`.
+//!   - `FileLogger` - allows to log into `FILE*`.
+//!   - `StringLogger` - logs into a `String`.
 class ASMJIT_VIRTAPI Logger {
 public:
+  ASMJIT_BASE_CLASS(Logger)
   ASMJIT_NONCOPYABLE(Logger)
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! Format options.
+  FormatOptions _options;
 
-  //! Create a `Logger` instance.
+  //! \name Construction & Destruction
+  //! \{
+
+  //! Creates a `Logger` instance.
   ASMJIT_API Logger() noexcept;
-  //! Destroy the `Logger` instance.
+  //! Destroys the `Logger` instance.
   ASMJIT_API virtual ~Logger() noexcept;
 
-  // --------------------------------------------------------------------------
-  // [Logging]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Log `str` - must be reimplemented.
-  virtual Error _log(const char* data, size_t size) noexcept = 0;
-
-  //! Log a string `str`, which is either null terminated or having size `size`.
-  inline Error log(const char* data, size_t size = Globals::kNullTerminated) noexcept { return _log(data, size); }
-  //! Log a content of a `StringBuilder` `str`.
-  inline Error log(const StringBuilder& str) noexcept { return _log(str.data(), str.size()); }
-
-  //! Format the message by using `std::snprintf()` and then send to `log()`.
-  ASMJIT_API Error logf(const char* fmt, ...) noexcept;
-  //! Format the message by using `std::vsnprintf()` and then send to `log()`.
-  ASMJIT_API Error logv(const char* fmt, std::va_list ap) noexcept;
-  //! Log binary data.
-  ASMJIT_API Error logBinary(const void* data, size_t size) noexcept;
-
-  // --------------------------------------------------------------------------
-  // [Options]
-  // --------------------------------------------------------------------------
+  //! \name Format Options
+  //! \{
 
   inline FormatOptions& options() noexcept { return _options; }
   inline const FormatOptions& options() const noexcept { return _options; }
@@ -166,59 +156,73 @@ public:
   inline void setIndentation(uint32_t type, uint32_t n) noexcept { _options.setIndentation(type, n); }
   inline void resetIndentation(uint32_t type) noexcept { _options.resetIndentation(type); }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Log options.
-  FormatOptions _options;
+  //! \name Logging Interface
+  //! \{
+
+  //! Logs `str` - must be reimplemented.
+  virtual Error _log(const char* data, size_t size) noexcept = 0;
+
+  //! Logs string `str`, which is either null terminated or having size `size`.
+  inline Error log(const char* data, size_t size = SIZE_MAX) noexcept { return _log(data, size); }
+  //! Logs content of a string `str`.
+  inline Error log(const String& str) noexcept { return _log(str.data(), str.size()); }
+
+  //! Formats the message by using `snprintf()` and then sends the result
+  //! to `log()`.
+  ASMJIT_API Error logf(const char* fmt, ...) noexcept;
+
+  //! Formats the message by using `vsnprintf()` and then sends the result
+  //! to `log()`.
+  ASMJIT_API Error logv(const char* fmt, va_list ap) noexcept;
+
+  //! Logs binary data.
+  ASMJIT_API Error logBinary(const void* data, size_t size) noexcept;
+
+  //! \}
 };
 
 // ============================================================================
 // [asmjit::FileLogger]
 // ============================================================================
 
-//! Logger that can log to a `std::FILE*`.
+//! Logger that can log to a `FILE*`.
 class ASMJIT_VIRTAPI FileLogger : public Logger {
 public:
   ASMJIT_NONCOPYABLE(FileLogger)
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  FILE* _file;
 
-  //! Create a new `FileLogger` that logs to `std::FILE*`.
-  ASMJIT_API FileLogger(std::FILE* file = nullptr) noexcept;
-  //! Destroy the `FileLogger`.
+  //! \name Construction & Destruction
+  //! \{
+
+  //! Creates a new `FileLogger` that logs to `FILE*`.
+  ASMJIT_API FileLogger(FILE* file = nullptr) noexcept;
+  //! Destroys the `FileLogger`.
   ASMJIT_API virtual ~FileLogger() noexcept;
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Get the logging output stream or null if the logger has no output stream.
-  inline std::FILE* file() const noexcept { return _file; }
+  //! \name Accessors
+  //! \{
 
-  //! Set the logging output stream to `stream` or null.
+  //! Returns the logging output stream or null if the logger has no output
+  //! stream.
+  inline FILE* file() const noexcept { return _file; }
+
+  //! Sets the logging output stream to `stream` or null.
   //!
-  //! NOTE: If the `file` is null the logging will be disabled. When a logger
+  //! \note If the `file` is null the logging will be disabled. When a logger
   //! is attached to `CodeHolder` or any emitter the logging API will always
   //! be called regardless of the output file. This means that if you really
   //! want to disable logging at emitter level you must not attach a logger
   //! to it.
-  inline void setFile(std::FILE* file) noexcept { _file = file; }
+  inline void setFile(FILE* file) noexcept { _file = file; }
 
-  // --------------------------------------------------------------------------
-  // [Logging]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  ASMJIT_API Error _log(const char* data, size_t size = Globals::kNullTerminated) noexcept override;
-
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  std::FILE* _file;
+  ASMJIT_API Error _log(const char* data, size_t size = SIZE_MAX) noexcept override;
 };
 
 // ============================================================================
@@ -230,41 +234,40 @@ class ASMJIT_VIRTAPI StringLogger : public Logger {
 public:
   ASMJIT_NONCOPYABLE(StringLogger)
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! Logger data as string.
+  String _content;
+
+  //! \name Construction & Destruction
+  //! \{
 
   //! Create new `StringLogger`.
   ASMJIT_API StringLogger() noexcept;
-  //! Destroy the `StringLogger`.
+  //! Destroys the `StringLogger`.
   ASMJIT_API virtual ~StringLogger() noexcept;
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Get `char*` pointer which represents string buffer.
+  //! \name Logger Data Accessors
+  //! \{
+
+  //! Returns aggregated logger data as `char*` pointer.
   //!
   //! The pointer is owned by `StringLogger`, it can't be modified or freed.
   inline const char* data() const noexcept { return _content.data(); }
-  //! Get the size of the string returned by `data()`.
-  inline size_t size() const noexcept { return _content.size(); }
+  //! Returns size of the data returned by `data()`.
+  inline size_t dataSize() const noexcept { return _content.size(); }
 
-  //! Clear the internal buffer.
+  //! \}
+
+  //! \name Logger Data Manipulation
+  //! \{
+
+  //! Clears the accumulated logger data.
   inline void clear() noexcept { _content.clear(); }
 
-  // --------------------------------------------------------------------------
-  // [Logging]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  ASMJIT_API Error _log(const char* data, size_t size = Globals::kNullTerminated) noexcept override;
-
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  //! Output string.
-  StringBuilder _content;
+  ASMJIT_API Error _log(const char* data, size_t size = SIZE_MAX) noexcept override;
 };
 
 // ============================================================================
@@ -273,7 +276,7 @@ public:
 
 struct Logging {
   ASMJIT_API static Error formatRegister(
-    StringBuilder& sb,
+    String& sb,
     uint32_t flags,
     const BaseEmitter* emitter,
     uint32_t archId,
@@ -281,32 +284,32 @@ struct Logging {
     uint32_t regId) noexcept;
 
   ASMJIT_API static Error formatLabel(
-    StringBuilder& sb,
+    String& sb,
     uint32_t flags,
     const BaseEmitter* emitter,
     uint32_t labelId) noexcept;
 
   ASMJIT_API static Error formatOperand(
-    StringBuilder& sb,
+    String& sb,
     uint32_t flags,
     const BaseEmitter* emitter,
     uint32_t archId,
     const Operand_& op) noexcept;
 
   ASMJIT_API static Error formatInstruction(
-    StringBuilder& sb,
+    String& sb,
     uint32_t flags,
     const BaseEmitter* emitter,
     uint32_t archId,
-    const BaseInst& inst, const Operand_* operands, uint32_t count) noexcept;
+    const BaseInst& inst, const Operand_* operands, uint32_t opCount) noexcept;
 
   ASMJIT_API static Error formatTypeId(
-    StringBuilder& sb,
+    String& sb,
     uint32_t typeId) noexcept;
 
-  #ifndef ASMJIT_DISABLE_BUILDER
+  #ifndef ASMJIT_NO_BUILDER
   ASMJIT_API static Error formatNode(
-    StringBuilder& sb,
+    String& sb,
     uint32_t flags,
     const BaseBuilder* cb,
     const BaseNode* node_) noexcept;
@@ -322,7 +325,7 @@ struct Logging {
   };
 
   static Error formatLine(
-    StringBuilder& sb,
+    String& sb,
     const uint8_t* binData, size_t binSize, size_t dispSize, size_t immSize, const char* comment) noexcept;
   #endif
 };
@@ -332,5 +335,4 @@ struct Logging {
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
 #endif // _ASMJIT_CORE_LOGGER_H

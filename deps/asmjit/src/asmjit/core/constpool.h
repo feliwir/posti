@@ -1,20 +1,19 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_CONSTPOOL_H
 #define _ASMJIT_CORE_CONSTPOOL_H
 
-// [Dependencies]
+#include "../core/support.h"
 #include "../core/zone.h"
 #include "../core/zonetree.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_api
+//! \addtogroup asmjit_core
 //! \{
 
 // ============================================================================
@@ -33,6 +32,8 @@ public:
     //! Global constant, embedded at the end of the currently compiled code.
     kScopeGlobal = 1
   };
+
+  //! \cond INTERNAL
 
   //! Index of a given size in const-pool table.
   enum Index : uint32_t {
@@ -70,51 +71,34 @@ public:
     uint32_t _offset;                    //!< Data offset from the beginning of the pool.
   };
 
+  //! Data comparer used internally.
   class Compare {
   public:
     inline Compare(size_t dataSize) noexcept
       : _dataSize(dataSize) {}
 
     inline int operator()(const Node& a, const Node& b) const noexcept {
-      return std::memcmp(a.data(), b.data(), _dataSize);
+      return ::memcmp(a.data(), b.data(), _dataSize);
     }
 
     inline int operator()(const Node& a, const void* data) const noexcept {
-      return std::memcmp(a.data(), data, _dataSize);
+      return ::memcmp(a.data(), data, _dataSize);
     }
 
     size_t _dataSize;
   };
 
-  // --------------------------------------------------------------------------
-  // [Tree]
-  // --------------------------------------------------------------------------
-
-  //! \internal
-  //!
   //! Zone-allocated const-pool tree.
   struct Tree {
-    // --------------------------------------------------------------------------
-    // [Construction / Destruction]
-    // --------------------------------------------------------------------------
-
     inline explicit Tree(size_t dataSize = 0) noexcept
       : _tree(),
         _size(0),
         _dataSize(dataSize) {}
 
-    // --------------------------------------------------------------------------
-    // [Reset]
-    // --------------------------------------------------------------------------
-
     inline void reset() noexcept {
       _tree.reset();
       _size = 0;
     }
-
-    // --------------------------------------------------------------------------
-    // [Accessors]
-    // --------------------------------------------------------------------------
 
     inline bool empty() const noexcept { return _size == 0; }
     inline size_t size() const noexcept { return _size; }
@@ -123,10 +107,6 @@ public:
       ASMJIT_ASSERT(empty());
       _dataSize = dataSize;
     }
-
-    // --------------------------------------------------------------------------
-    // [Ops]
-    // --------------------------------------------------------------------------
 
     inline Node* get(const void* data) noexcept {
       Compare cmp(_dataSize);
@@ -138,10 +118,6 @@ public:
       _tree.insert(node, cmp);
       _size++;
     }
-
-    // --------------------------------------------------------------------------
-    // [ForEach]
-    // --------------------------------------------------------------------------
 
     template<typename Visitor>
     inline void forEach(Visitor& visitor) const noexcept {
@@ -176,53 +152,65 @@ public:
       }
     }
 
-    // --------------------------------------------------------------------------
-    // [Helpers]
-    // --------------------------------------------------------------------------
-
     static inline Node* _newNode(Zone* zone, const void* data, size_t size, size_t offset, bool shared) noexcept {
       Node* node = zone->allocT<Node>(sizeof(Node) + size);
       if (ASMJIT_UNLIKELY(!node)) return nullptr;
 
       node = new(node) Node(offset, shared);
-      std::memcpy(node->data(), data, size);
+      memcpy(node->data(), data, size);
       return node;
     }
 
-    // --------------------------------------------------------------------------
-    // [Members]
-    // --------------------------------------------------------------------------
-
-    ZoneTree<Node> _tree;                //!< RB tree.
-    size_t _size;                        //!< Size of the tree (number of nodes).
-    size_t _dataSize;                    //!< Size of the data.
+    //! RB tree.
+    ZoneTree<Node> _tree;
+    //! Size of the tree (number of nodes).
+    size_t _size;
+    //! Size of the data.
+    size_t _dataSize;
   };
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! \endcond
+
+  //! Zone allocator.
+  Zone* _zone;
+  //! Tree per size.
+  Tree _tree[kIndexCount];
+  //! Gaps per size.
+  Gap* _gaps[kIndexCount];
+  //! Gaps pool
+  Gap* _gapPool;
+
+  //! Size of the pool (in bytes).
+  size_t _size;
+  //! Required pool alignment.
+  size_t _alignment;
+
+  //! \name Construction & Destruction
+  //! \{
 
   ASMJIT_API ConstPool(Zone* zone) noexcept;
   ASMJIT_API ~ConstPool() noexcept;
 
-  // --------------------------------------------------------------------------
-  // [Reset]
-  // --------------------------------------------------------------------------
-
   ASMJIT_API void reset(Zone* zone) noexcept;
 
-  // --------------------------------------------------------------------------
-  // [Ops]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Get whether the constant-pool is empty.
+  //! \name Accessors
+  //! \{
+
+  //! Tests whether the constant-pool is empty.
   inline bool empty() const noexcept { return _size == 0; }
-  //! Get the size of the constant-pool in bytes.
+  //! Returns the size of the constant-pool in bytes.
   inline size_t size() const noexcept { return _size; }
-  //! Get minimum alignment.
+  //! Returns minimum alignment.
   inline size_t alignment() const noexcept { return _alignment; }
 
-  //! Add a constant to the constant pool.
+  //! \}
+
+  //! \name Utilities
+  //! \{
+
+  //! Adds a constant to the constant pool.
   //!
   //! The constant must have known size, which is 1, 2, 4, 8, 16 or 32 bytes.
   //! The constant is added to the pool only if it doesn't not exist, otherwise
@@ -241,29 +229,12 @@ public:
   //! independent slots will be generated by the pool.
   ASMJIT_API Error add(const void* data, size_t size, size_t& dstOffset) noexcept;
 
-  // --------------------------------------------------------------------------
-  // [Fill]
-  // --------------------------------------------------------------------------
-
-  //! Fill the destination with the constants from the pool.
+  //! Fills the destination with the content of this constant pool.
   ASMJIT_API void fill(void* dst) const noexcept;
-
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  Zone* _zone;                           //!< Zone allocator.
-  Tree _tree[kIndexCount];               //!< Tree per size.
-  Gap* _gaps[kIndexCount];               //!< Gaps per size.
-  Gap* _gapPool;                         //!< Gaps pool
-
-  size_t _size;                          //!< Size of the pool (in bytes).
-  size_t _alignment;                     //!< Required pool alignment.
 };
 
 //! \}
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
 #endif // _ASMJIT_CORE_CONSTPOOL_H

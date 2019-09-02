@@ -1,19 +1,17 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Guard]
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_BUILDER
+#ifndef ASMJIT_NO_BUILDER
 
-// [Dependencies]
 #include "../core/builder.h"
 #include "../core/logging.h"
+#include "../core/support.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
@@ -21,8 +19,6 @@ ASMJIT_BEGIN_NAMESPACE
 // [asmjit::PostponedErrorHandler (Internal)]
 // ============================================================================
 
-//! \internal
-//!
 //! Postponed error handler that never throws. Used as a temporal error handler
 //! to run passes. If error occurs, the caller is notified and will call the
 //! real error handler, that can throw.
@@ -32,10 +28,10 @@ public:
     ASMJIT_UNUSED(err);
     ASMJIT_UNUSED(origin);
 
-    _message.setString(message);
+    _message.assignString(message);
   }
 
-  StringBuilderTmp<128> _message;
+  StringTmp<128> _message;
 };
 
 // ============================================================================
@@ -50,9 +46,9 @@ BaseBuilder::BaseBuilder() noexcept
     _allocator(&_codeZone),
     _passes(),
     _labelNodes(),
+    _cursor(nullptr),
     _firstNode(nullptr),
     _lastNode(nullptr),
-    _cursor(nullptr),
     _nodeFlags(0) {}
 BaseBuilder::~BaseBuilder() noexcept {}
 
@@ -78,7 +74,7 @@ EmbedDataNode* BaseBuilder::newEmbedDataNode(const void* data, uint32_t size) no
       return nullptr;
 
     if (data)
-      std::memcpy(cloned, data, size);
+      memcpy(cloned, data, size);
     data = cloned;
   }
 
@@ -94,8 +90,8 @@ ConstPoolNode* BaseBuilder::newConstPoolNode() noexcept {
 
 CommentNode* BaseBuilder::newCommentNode(const char* data, size_t size) noexcept {
   if (data) {
-    if (size == Globals::kNullTerminated)
-      size = std::strlen(data);
+    if (size == SIZE_MAX)
+      size = strlen(data);
 
     if (size > 0) {
       data = static_cast<char*>(_dataZone.dup(data, size, true));
@@ -184,8 +180,9 @@ InstNode* BaseBuilder::newInstNodeRaw(uint32_t instId, uint32_t instOptions, uin
 
 BaseNode* BaseBuilder::addNode(BaseNode* node) noexcept {
   ASMJIT_ASSERT(node);
-  ASMJIT_ASSERT(node->prev() == nullptr);
-  ASMJIT_ASSERT(node->next() == nullptr);
+  ASMJIT_ASSERT(!node->_prev);
+  ASMJIT_ASSERT(!node->_next);
+  ASMJIT_ASSERT(!node->isActive());
 
   if (!_cursor) {
     if (!_firstNode) {
@@ -193,8 +190,8 @@ BaseNode* BaseBuilder::addNode(BaseNode* node) noexcept {
       _lastNode = node;
     }
     else {
-      node->_setNext(_firstNode);
-      _firstNode->_setPrev(node);
+      node->_next = _firstNode;
+      _firstNode->_prev = node;
       _firstNode = node;
     }
   }
@@ -202,15 +199,19 @@ BaseNode* BaseBuilder::addNode(BaseNode* node) noexcept {
     BaseNode* prev = _cursor;
     BaseNode* next = _cursor->next();
 
-    node->_setPrev(prev);
-    node->_setNext(next);
+    node->_prev = prev;
+    node->_next = next;
 
-    prev->_setNext(node);
+    prev->_next = node;
     if (next)
-      next->_setPrev(node);
+      next->_prev = node;
     else
       _lastNode = node;
   }
+
+  node->addFlags(BaseNode::kFlagIsActive);
+  if (node->isSection())
+    _dirtySectionLinks = true;
 
   _cursor = node;
   return node;
@@ -220,18 +221,22 @@ BaseNode* BaseBuilder::addAfter(BaseNode* node, BaseNode* ref) noexcept {
   ASMJIT_ASSERT(node);
   ASMJIT_ASSERT(ref);
 
-  ASMJIT_ASSERT(node->prev() == nullptr);
-  ASMJIT_ASSERT(node->next() == nullptr);
+  ASMJIT_ASSERT(!node->_prev);
+  ASMJIT_ASSERT(!node->_next);
 
   BaseNode* prev = ref;
   BaseNode* next = ref->next();
 
-  node->_setPrev(prev);
-  node->_setNext(next);
+  node->_prev = prev;
+  node->_next = next;
 
-  prev->_setNext(node);
+  node->addFlags(BaseNode::kFlagIsActive);
+  if (node->isSection())
+    _dirtySectionLinks = true;
+
+  prev->_next = node;
   if (next)
-    next->_setPrev(node);
+    next->_prev = node;
   else
     _lastNode = node;
 
@@ -240,19 +245,25 @@ BaseNode* BaseBuilder::addAfter(BaseNode* node, BaseNode* ref) noexcept {
 
 BaseNode* BaseBuilder::addBefore(BaseNode* node, BaseNode* ref) noexcept {
   ASMJIT_ASSERT(node != nullptr);
-  ASMJIT_ASSERT(node->prev() == nullptr);
-  ASMJIT_ASSERT(node->next() == nullptr);
+  ASMJIT_ASSERT(!node->_prev);
+  ASMJIT_ASSERT(!node->_next);
+  ASMJIT_ASSERT(!node->isActive());
   ASMJIT_ASSERT(ref != nullptr);
+  ASMJIT_ASSERT(ref->isActive());
 
   BaseNode* prev = ref->prev();
   BaseNode* next = ref;
 
-  node->_setPrev(prev);
-  node->_setNext(next);
+  node->_prev = prev;
+  node->_next = next;
 
-  next->_setPrev(node);
+  node->addFlags(BaseNode::kFlagIsActive);
+  if (node->isSection())
+    _dirtySectionLinks = true;
+
+  next->_prev = node;
   if (prev)
-    prev->_setNext(node);
+    prev->_next = node;
   else
     _firstNode = node;
 
@@ -260,21 +271,27 @@ BaseNode* BaseBuilder::addBefore(BaseNode* node, BaseNode* ref) noexcept {
 }
 
 BaseNode* BaseBuilder::removeNode(BaseNode* node) noexcept {
+  if (!node->isActive())
+    return node;
+
   BaseNode* prev = node->prev();
   BaseNode* next = node->next();
 
   if (_firstNode == node)
     _firstNode = next;
   else
-    prev->_setNext(next);
+    prev->_next = next;
 
   if (_lastNode == node)
     _lastNode  = prev;
   else
-    next->_setPrev(prev);
+    next->_prev = prev;
 
-  node->_setPrev(nullptr);
-  node->_setNext(nullptr);
+  node->_prev = nullptr;
+  node->_next = nullptr;
+  node->clearFlags(BaseNode::kFlagIsActive);
+  if (node->isSection())
+    _dirtySectionLinks = true;
 
   if (_cursor == node)
     _cursor = prev;
@@ -288,26 +305,33 @@ void BaseBuilder::removeNodes(BaseNode* first, BaseNode* last) noexcept {
     return;
   }
 
+  if (!first->isActive())
+    return;
+
   BaseNode* prev = first->prev();
   BaseNode* next = last->next();
 
   if (_firstNode == first)
     _firstNode = next;
   else
-    prev->_setNext(next);
+    prev->_next = next;
 
   if (_lastNode == last)
     _lastNode  = prev;
   else
-    next->_setPrev(prev);
+    next->_prev = prev;
 
   BaseNode* node = first;
+  uint32_t didRemoveSection = false;
+
   for (;;) {
     next = node->next();
     ASMJIT_ASSERT(next != nullptr);
 
-    node->_setPrev(nullptr);
-    node->_setNext(nullptr);
+    node->_prev = nullptr;
+    node->_next = nullptr;
+    node->clearFlags(BaseNode::kFlagIsActive);
+    didRemoveSection |= uint32_t(node->isSection());
 
     if (_cursor == node)
       _cursor = prev;
@@ -316,6 +340,9 @@ void BaseBuilder::removeNodes(BaseNode* first, BaseNode* last) noexcept {
       break;
     node = next;
   }
+
+  if (didRemoveSection)
+    _dirtySectionLinks = true;
 }
 
 BaseNode* BaseBuilder::setCursor(BaseNode* node) noexcept {
@@ -325,15 +352,90 @@ BaseNode* BaseBuilder::setCursor(BaseNode* node) noexcept {
 }
 
 // ============================================================================
-// [asmjit::BaseBuilder - Label Management]
+// [asmjit::BaseBuilder - Section]
 // ============================================================================
 
-Error BaseBuilder::labelNodeOf(LabelNode** pOut, uint32_t id) noexcept {
+Error BaseBuilder::sectionNodeOf(SectionNode** pOut, uint32_t sectionId) noexcept {
   if (ASMJIT_UNLIKELY(!_code))
     return DebugUtils::errored(kErrorNotInitialized);
 
-  uint32_t index = Operand::unpackId(id);
+  if (ASMJIT_UNLIKELY(!_code->isSectionValid(sectionId)))
+    return DebugUtils::errored(kErrorInvalidSection);
 
+  if (sectionId >= _sectionNodes.size())
+    ASMJIT_PROPAGATE(_sectionNodes.resize(&_allocator, sectionId + 1));
+
+  SectionNode* node = _sectionNodes[sectionId];
+  if (!node) {
+    node = newNodeT<SectionNode>(sectionId);
+    if (ASMJIT_UNLIKELY(!node))
+      return DebugUtils::errored(kErrorOutOfMemory);
+    _sectionNodes[sectionId] = node;
+  }
+
+  *pOut = node;
+  return kErrorOk;
+}
+
+Error BaseBuilder::section(Section* section) {
+  SectionNode* node;
+  Error err = sectionNodeOf(&node, section->id());
+
+  if (ASMJIT_UNLIKELY(err))
+    return reportError(err);
+
+  if (!node->isActive()) {
+    // Insert the section at the end if it was not part of the code.
+    addAfter(node, lastNode());
+    _cursor = node;
+  }
+  else {
+    // This is a bit tricky. We cache section links to make sure that
+    // switching sections doesn't involve traversal in linked-list unless
+    // the position of the section has changed.
+    if (hasDirtySectionLinks())
+      updateSectionLinks();
+
+    if (node->_nextSection)
+      _cursor = node->_nextSection->_prev;
+    else
+      _cursor = _lastNode;
+  }
+
+  return kErrorOk;
+}
+
+void BaseBuilder::updateSectionLinks() noexcept {
+  if (!_dirtySectionLinks)
+    return;
+
+  BaseNode* node_ = _firstNode;
+  SectionNode* currentSection = nullptr;
+
+  while (node_) {
+    if (node_->isSection()) {
+      if (currentSection)
+        currentSection->_nextSection = node_->as<SectionNode>();
+      currentSection = node_->as<SectionNode>();
+    }
+    node_ = node_->next();
+  }
+
+  if (currentSection)
+    currentSection->_nextSection = nullptr;
+
+  _dirtySectionLinks = false;
+}
+
+// ============================================================================
+// [asmjit::BaseBuilder - Labels]
+// ============================================================================
+
+Error BaseBuilder::labelNodeOf(LabelNode** pOut, uint32_t labelId) noexcept {
+  if (ASMJIT_UNLIKELY(!_code))
+    return DebugUtils::errored(kErrorNotInitialized);
+
+  uint32_t index = labelId;
   if (ASMJIT_UNLIKELY(index >= _code->labelCount()))
     return DebugUtils::errored(kErrorInvalidLabel);
 
@@ -342,9 +444,9 @@ Error BaseBuilder::labelNodeOf(LabelNode** pOut, uint32_t id) noexcept {
 
   LabelNode* node = _labelNodes[index];
   if (!node) {
-    node = newNodeT<LabelNode>(id);
+    node = newNodeT<LabelNode>(labelId);
     if (ASMJIT_UNLIKELY(!node))
-      return DebugUtils::errored(kErrorNoHeapMemory);
+      return DebugUtils::errored(kErrorOutOfMemory);
     _labelNodes[index] = node;
   }
 
@@ -358,53 +460,69 @@ Error BaseBuilder::registerLabelNode(LabelNode* node) noexcept {
 
   // Don't call `reportError()` from here, we are noexcept and we are called
   // by `newLabelNode()` and `newFuncNode()`, which are noexcept as well.
-  uint32_t id;
-  ASMJIT_PROPAGATE(_code->newLabelId(id));
-  uint32_t index = Operand::unpackId(id);
+  LabelEntry* le;
+  ASMJIT_PROPAGATE(_code->newLabelEntry(&le));
+  uint32_t labelId = le->id();
 
   // We just added one label so it must be true.
-  ASMJIT_ASSERT(_labelNodes.size() < index + 1);
-  ASMJIT_PROPAGATE(_labelNodes.resize(&_allocator, index + 1));
+  ASMJIT_ASSERT(_labelNodes.size() < labelId + 1);
+  ASMJIT_PROPAGATE(_labelNodes.resize(&_allocator, labelId + 1));
 
-  _labelNodes[index] = node;
-  node->_id = id;
+  _labelNodes[labelId] = node;
+  node->_id = labelId;
+
+  return kErrorOk;
+}
+
+static Error BaseBuilder_newLabelInternal(BaseBuilder* self, uint32_t labelId) noexcept {
+  ASMJIT_ASSERT(self->_labelNodes.size() < labelId + 1);
+  LabelNode* node = self->newNodeT<LabelNode>(labelId);
+
+  if (ASMJIT_UNLIKELY(!node))
+    return DebugUtils::errored(kErrorOutOfMemory);
+
+  ASMJIT_PROPAGATE(self->_labelNodes.resize(&self->_allocator, labelId + 1));
+  self->_labelNodes[labelId] = node;
+  node->_id = labelId;
   return kErrorOk;
 }
 
 Label BaseBuilder::newLabel() {
-  uint32_t id = 0;
+  uint32_t labelId = Globals::kInvalidId;
   if (_code) {
-    LabelNode* node = newNodeT<LabelNode>(id);
-    if (ASMJIT_UNLIKELY(!node)) {
-      reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    LabelEntry* le;
+    Error err = _code->newLabelEntry(&le);
+    if (ASMJIT_UNLIKELY(err)) {
+      reportError(err);
     }
     else {
-      Error err = registerLabelNode(node);
+      err = BaseBuilder_newLabelInternal(this, le->id());
       if (ASMJIT_UNLIKELY(err))
         reportError(err);
       else
-        id = node->id();
+        labelId = le->id();
     }
   }
-  return Label(id);
+  return Label(labelId);
 }
 
 Label BaseBuilder::newNamedLabel(const char* name, size_t nameSize, uint32_t type, uint32_t parentId) {
-  uint32_t id = 0;
+  uint32_t labelId = Globals::kInvalidId;
   if (_code) {
-    LabelNode* node = newNodeT<LabelNode>(id);
-    if (ASMJIT_UNLIKELY(!node)) {
-      reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    LabelEntry* le;
+    Error err = _code->newNamedLabelEntry(&le, name, nameSize, type, parentId);
+    if (ASMJIT_UNLIKELY(err)) {
+      reportError(err);
     }
     else {
-      Error err = _code->newNamedLabelId(id, name, nameSize, type, parentId);
+      err = BaseBuilder_newLabelInternal(this, le->id());
       if (ASMJIT_UNLIKELY(err))
         reportError(err);
       else
-        id = node->id();
+        labelId = le->id();
     }
   }
-  return Label(id);
+  return Label(labelId);
 }
 
 Error BaseBuilder::bind(const Label& label) {
@@ -419,12 +537,12 @@ Error BaseBuilder::bind(const Label& label) {
 }
 
 // ============================================================================
-// [asmjit::BaseBuilder - Pass Management]
+// [asmjit::BaseBuilder - Passes]
 // ============================================================================
 
 ASMJIT_FAVOR_SIZE Pass* BaseBuilder::passByName(const char* name) const noexcept {
   for (Pass* pass : _passes)
-    if (std::strcmp(pass->name(), name) == 0)
+    if (strcmp(pass->name(), name) == 0)
       return pass;
   return nullptr;
 }
@@ -436,7 +554,7 @@ ASMJIT_FAVOR_SIZE Error BaseBuilder::addPass(Pass* pass) noexcept {
   if (ASMJIT_UNLIKELY(pass == nullptr)) {
     // Since this is directly called by `addPassT()` we treat `null` argument
     // as out-of-memory condition. Otherwise it would be API misuse.
-    return DebugUtils::errored(kErrorNoHeapMemory);
+    return DebugUtils::errored(kErrorOutOfMemory);
   }
   else if (ASMJIT_UNLIKELY(pass->_cb)) {
     // Kinda weird, but okay...
@@ -525,7 +643,7 @@ Error BaseBuilder::_emit(uint32_t instId, const Operand_& o0, const Operand_& o1
       return DebugUtils::errored(kErrorNotInitialized);
 
     // Strict validation.
-    #ifndef ASMJIT_DISABLE_INST_API
+    #ifndef ASMJIT_NO_VALIDATION
     if (hasEmitterOption(kOptionStrictValidation)) {
       Operand_ opArray[4];
       opArray[0].copyFrom(o0);
@@ -533,7 +651,7 @@ Error BaseBuilder::_emit(uint32_t instId, const Operand_& o0, const Operand_& o1
       opArray[2].copyFrom(o2);
       opArray[3].copyFrom(o3);
 
-      Error err = BaseInst::validate(archId(), BaseInst(instId, options, _extraReg), opArray, opCount);
+      Error err = InstAPI::validate(archId(), BaseInst(instId, options, _extraReg), opArray, opCount);
       if (ASMJIT_UNLIKELY(err)) {
         resetInstOptions();
         resetExtraReg();
@@ -555,7 +673,7 @@ Error BaseBuilder::_emit(uint32_t instId, const Operand_& o0, const Operand_& o1
     resetInstOptions();
     resetExtraReg();
     resetInlineComment();
-    return reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    return reportError(DebugUtils::errored(kErrorOutOfMemory));
   }
 
   node = new(node) InstNode(this, instId, options, opCount, opCapacity);
@@ -570,7 +688,7 @@ Error BaseBuilder::_emit(uint32_t instId, const Operand_& o0, const Operand_& o1
 
   const char* comment = inlineComment();
   if (comment)
-    node->setInlineComment(static_cast<char*>(_dataZone.dup(comment, std::strlen(comment), true)));
+    node->setInlineComment(static_cast<char*>(_dataZone.dup(comment, strlen(comment), true)));
 
   resetInstOptions();
   resetExtraReg();
@@ -594,7 +712,7 @@ Error BaseBuilder::_emit(uint32_t instId, const Operand_& o0, const Operand_& o1
       return DebugUtils::errored(kErrorNotInitialized);
 
     // Strict validation.
-    #ifndef ASMJIT_DISABLE_INST_API
+    #ifndef ASMJIT_NO_VALIDATION
     if (hasEmitterOption(kOptionStrictValidation)) {
       Operand_ opArray[Globals::kMaxOpCount];
       opArray[0].copyFrom(o0);
@@ -604,7 +722,7 @@ Error BaseBuilder::_emit(uint32_t instId, const Operand_& o0, const Operand_& o1
       opArray[4].copyFrom(o4);
       opArray[5].copyFrom(o5);
 
-      Error err = BaseInst::validate(archId(), BaseInst(instId, options, _extraReg), opArray, opCount);
+      Error err = InstAPI::validate(archId(), BaseInst(instId, options, _extraReg), opArray, opCount);
       if (ASMJIT_UNLIKELY(err)) {
         resetInstOptions();
         resetExtraReg();
@@ -626,7 +744,7 @@ Error BaseBuilder::_emit(uint32_t instId, const Operand_& o0, const Operand_& o1
     resetInstOptions();
     resetExtraReg();
     resetInlineComment();
-    return reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    return reportError(DebugUtils::errored(kErrorOutOfMemory));
   }
 
   node = new(node) InstNode(this, instId, options, opCount, opCapacity);
@@ -642,7 +760,7 @@ Error BaseBuilder::_emit(uint32_t instId, const Operand_& o0, const Operand_& o1
 
   const char* comment = inlineComment();
   if (comment)
-    node->setInlineComment(static_cast<char*>(_dataZone.dup(comment, std::strlen(comment), true)));
+    node->setInlineComment(static_cast<char*>(_dataZone.dup(comment, strlen(comment), true)));
 
   resetInstOptions();
   resetExtraReg();
@@ -662,7 +780,7 @@ Error BaseBuilder::align(uint32_t alignMode, uint32_t alignment) {
 
   AlignNode* node = newAlignNode(alignMode, alignment);
   if (ASMJIT_UNLIKELY(!node))
-    return reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    return reportError(DebugUtils::errored(kErrorOutOfMemory));
 
   addNode(node);
   return kErrorOk;
@@ -672,13 +790,13 @@ Error BaseBuilder::align(uint32_t alignMode, uint32_t alignment) {
 // [asmjit::BaseBuilder - Embed]
 // ============================================================================
 
-Error BaseBuilder::embed(const void* data, uint32_t size) {
+Error BaseBuilder::embed(const void* data, uint32_t dataSize) {
   if (ASMJIT_UNLIKELY(!_code))
     return DebugUtils::errored(kErrorNotInitialized);
 
-  EmbedDataNode* node = newEmbedDataNode(data, size);
+  EmbedDataNode* node = newEmbedDataNode(data, dataSize);
   if (ASMJIT_UNLIKELY(!node))
-    return reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    return reportError(DebugUtils::errored(kErrorOutOfMemory));
 
   addNode(node);
   return kErrorOk;
@@ -688,9 +806,21 @@ Error BaseBuilder::embedLabel(const Label& label) {
   if (ASMJIT_UNLIKELY(!_code))
     return DebugUtils::errored(kErrorNotInitialized);
 
-  LabelDataNode* node = newNodeT<LabelDataNode>(label.id());
+  EmbedLabelNode* node = newNodeT<EmbedLabelNode>(label.id());
   if (ASMJIT_UNLIKELY(!node))
-    return reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    return reportError(DebugUtils::errored(kErrorOutOfMemory));
+
+  addNode(node);
+  return kErrorOk;
+}
+
+Error BaseBuilder::embedLabelDelta(const Label& label, const Label& base, uint32_t dataSize) {
+  if (ASMJIT_UNLIKELY(!_code))
+    return DebugUtils::errored(kErrorNotInitialized);
+
+  EmbedLabelDeltaNode* node = newNodeT<EmbedLabelDeltaNode>(label.id(), base.id(), dataSize);
+  if (ASMJIT_UNLIKELY(!node))
+    return reportError(DebugUtils::errored(kErrorOutOfMemory));
 
   addNode(node);
   return kErrorOk;
@@ -708,7 +838,7 @@ Error BaseBuilder::embedConstPool(const Label& label, const ConstPool& pool) {
 
   EmbedDataNode* node = newEmbedDataNode(nullptr, uint32_t(pool.size()));
   if (ASMJIT_UNLIKELY(!node))
-    return reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    return reportError(DebugUtils::errored(kErrorOutOfMemory));
 
   pool.fill(node->data());
   addNode(node);
@@ -725,7 +855,7 @@ Error BaseBuilder::comment(const char* data, size_t size) {
 
   CommentNode* node = newCommentNode(data, size);
   if (ASMJIT_UNLIKELY(!node))
-    return reportError(DebugUtils::errored(kErrorNoHeapMemory));
+    return reportError(DebugUtils::errored(kErrorOutOfMemory));
 
   addNode(node);
   return kErrorOk;
@@ -737,7 +867,7 @@ Error BaseBuilder::comment(const char* data, size_t size) {
 
 Error BaseBuilder::serialize(BaseEmitter* dst) {
   Error err = kErrorOk;
-  BaseNode* node_ = firstNode();
+  BaseNode* node_ = _firstNode;
 
   do {
     dst->setInlineComment(node_->inlineComment());
@@ -764,9 +894,17 @@ Error BaseBuilder::serialize(BaseEmitter* dst) {
       EmbedDataNode* node = node_->as<EmbedDataNode>();
       err = dst->embed(node->data(), node->size());
     }
-    else if (node_->isLabelData()) {
-      LabelDataNode* node = node_->as<LabelDataNode>();
+    else if (node_->isEmbedLabel()) {
+      EmbedLabelNode* node = node_->as<EmbedLabelNode>();
       err = dst->embedLabel(node->label());
+    }
+    else if (node_->isEmbedLabelDelta()) {
+      EmbedLabelDeltaNode* node = node_->as<EmbedLabelDeltaNode>();
+      err = dst->embedLabelDelta(node->label(), node->baseLabel(), node->dataSize());
+    }
+    else if (node_->isSection()) {
+      SectionNode* node = node_->as<SectionNode>();
+      err = dst->section(_code->sectionById(node->id()));
     }
     else if (node_->isComment()) {
       CommentNode* node = node_->as<CommentNode>();
@@ -784,9 +922,9 @@ Error BaseBuilder::serialize(BaseEmitter* dst) {
 // [asmjit::BaseBuilder - Logging]
 // ============================================================================
 
-#ifndef ASMJIT_DISABLE_LOGGING
-Error BaseBuilder::dump(StringBuilder& sb, uint32_t flags) const noexcept {
-  BaseNode* node = firstNode();
+#ifndef ASMJIT_NO_LOGGING
+Error BaseBuilder::dump(String& sb, uint32_t flags) const noexcept {
+  BaseNode* node = _firstNode;
   while (node) {
     ASMJIT_PROPAGATE(Logging::formatNode(sb, flags, this, node));
     sb.appendChar('\n');
@@ -802,11 +940,31 @@ Error BaseBuilder::dump(StringBuilder& sb, uint32_t flags) const noexcept {
 // ============================================================================
 
 Error BaseBuilder::onAttach(CodeHolder* code) noexcept {
-  return Base::onAttach(code);
+  ASMJIT_PROPAGATE(Base::onAttach(code));
+
+  SectionNode* initialSection;
+  Error err = sectionNodeOf(&initialSection, 0);
+
+  if (!err)
+    err = _passes.willGrow(&_allocator, 8);
+
+  if (ASMJIT_UNLIKELY(err)) {
+    onDetach(code);
+    return err;
+  }
+
+
+  _cursor = initialSection;
+  _firstNode = initialSection;
+  _lastNode = initialSection;
+  initialSection->setFlags(BaseNode::kFlagIsActive);
+
+  return kErrorOk;
 }
 
 Error BaseBuilder::onDetach(CodeHolder* code) noexcept {
   _passes.reset();
+  _sectionNodes.reset();
   _labelNodes.reset();
 
   _allocator.reset(&_codeZone);
@@ -816,9 +974,9 @@ Error BaseBuilder::onDetach(CodeHolder* code) noexcept {
 
   _nodeFlags = 0;
 
+  _cursor = nullptr;
   _firstNode = nullptr;
   _lastNode = nullptr;
-  _cursor = nullptr;
 
   return Base::onDetach(code);
 }
@@ -834,5 +992,4 @@ Pass::~Pass() noexcept {}
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
-#endif // !ASMJIT_DISABLE_BUILDER
+#endif // !ASMJIT_NO_BUILDER

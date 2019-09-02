@@ -1,24 +1,21 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Guard]
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_LOGGING
+#ifndef ASMJIT_NO_LOGGING
 
-// [Dependencies]
 #include "../core/builder.h"
 #include "../core/codeholder.h"
 #include "../core/compiler.h"
 #include "../core/emitter.h"
 #include "../core/logging.h"
-#include "../core/stringbuilder.h"
-#include "../core/stringutils.h"
+#include "../core/string.h"
+#include "../core/support.h"
 #include "../core/type.h"
 
 #ifdef ASMJIT_BUILD_X86
@@ -31,7 +28,7 @@
 
 ASMJIT_BEGIN_NAMESPACE
 
-#if defined(ASMJIT_DISABLE_COMPILER)
+#if defined(ASMJIT_NO_COMPILER)
 class VirtReg;
 #endif
 
@@ -49,7 +46,7 @@ Logger::~Logger() noexcept {}
 
 Error Logger::logf(const char* fmt, ...) noexcept {
   Error err;
-  std::va_list ap;
+  va_list ap;
 
   va_start(ap, fmt);
   err = logv(fmt, ap);
@@ -58,23 +55,23 @@ Error Logger::logf(const char* fmt, ...) noexcept {
   return err;
 }
 
-Error Logger::logv(const char* fmt, std::va_list ap) noexcept {
-  StringBuilderTmp<2048> sb;
-  ASMJIT_PROPAGATE(sb.appendFormatVA(fmt, ap));
+Error Logger::logv(const char* fmt, va_list ap) noexcept {
+  StringTmp<2048> sb;
+  ASMJIT_PROPAGATE(sb.appendVFormat(fmt, ap));
   return log(sb);
 }
 
 Error Logger::logBinary(const void* data, size_t size) noexcept {
   static const char prefix[] = "db ";
 
-  StringBuilderTmp<256> sb;
+  StringTmp<256> sb;
   sb.appendString(prefix, ASMJIT_ARRAY_SIZE(prefix) - 1);
 
   size_t i = size;
   const uint8_t* s = static_cast<const uint8_t*>(data);
 
   while (i) {
-    uint32_t n = uint32_t(std::min<size_t>(i, 16));
+    uint32_t n = uint32_t(Support::min<size_t>(i, 16));
     sb.truncate(ASMJIT_ARRAY_SIZE(prefix) - 1);
     sb.appendHex(s, n);
     sb.appendChar('\n');
@@ -90,7 +87,7 @@ Error Logger::logBinary(const void* data, size_t size) noexcept {
 // [asmjit::FileLogger - Construction / Destruction]
 // ============================================================================
 
-FileLogger::FileLogger(std::FILE* file) noexcept
+FileLogger::FileLogger(FILE* file) noexcept
   : _file(nullptr) { setFile(file); }
 FileLogger::~FileLogger() noexcept {}
 
@@ -102,7 +99,7 @@ Error FileLogger::_log(const char* data, size_t size) noexcept {
   if (!_file)
     return kErrorOk;
 
-  if (size == Globals::kNullTerminated)
+  if (size == SIZE_MAX)
     size = strlen(data);
 
   fwrite(data, 1, size, _file);
@@ -129,7 +126,7 @@ Error StringLogger::_log(const char* data, size_t size) noexcept {
 // ============================================================================
 
 Error Logging::formatLabel(
-  StringBuilder& sb,
+  String& sb,
   uint32_t flags,
   const BaseEmitter* emitter,
   uint32_t labelId) noexcept {
@@ -148,7 +145,7 @@ Error Logging::formatLabel(
       if (ASMJIT_UNLIKELY(!pe))
         ASMJIT_PROPAGATE(sb.appendFormat("InvalidLabel[Id=%u]", labelId));
       else if (ASMJIT_UNLIKELY(!pe->hasName()))
-        ASMJIT_PROPAGATE(sb.appendFormat("L%u", Operand::unpackId(parentId)));
+        ASMJIT_PROPAGATE(sb.appendFormat("L%u", parentId));
       else
         ASMJIT_PROPAGATE(sb.appendString(pe->name()));
 
@@ -157,12 +154,12 @@ Error Logging::formatLabel(
     return sb.appendString(le->name());
   }
   else {
-    return sb.appendFormat("L%u", Operand::unpackId(labelId));
+    return sb.appendFormat("L%u", labelId);
   }
 }
 
 Error Logging::formatRegister(
-  StringBuilder& sb,
+  String& sb,
   uint32_t flags,
   const BaseEmitter* emitter,
   uint32_t archId,
@@ -183,7 +180,7 @@ Error Logging::formatRegister(
 }
 
 Error Logging::formatOperand(
-  StringBuilder& sb,
+  String& sb,
   uint32_t flags,
   const BaseEmitter* emitter,
   uint32_t archId,
@@ -203,26 +200,26 @@ Error Logging::formatOperand(
 }
 
 Error Logging::formatInstruction(
-  StringBuilder& sb,
+  String& sb,
   uint32_t flags,
   const BaseEmitter* emitter,
   uint32_t archId,
-  const BaseInst& inst, const Operand_* operands, uint32_t count) noexcept {
+  const BaseInst& inst, const Operand_* operands, uint32_t opCount) noexcept {
 
   #ifdef ASMJIT_BUILD_X86
   if (ArchInfo::isX86Family(archId))
-    return x86::LoggingInternal::formatInstruction(sb, flags, emitter, archId, inst, operands, count);
+    return x86::LoggingInternal::formatInstruction(sb, flags, emitter, archId, inst, operands, opCount);
   #endif
 
   #ifdef ASMJIT_BUILD_ARM
   if (ArchInfo::isArmFamily(archId))
-    return arm::LoggingInternal::formatInstruction(sb, flags, emitter, archId, inst, operands, count);
+    return arm::LoggingInternal::formatInstruction(sb, flags, emitter, archId, inst, operands, opCount);
   #endif
 
   return kErrorInvalidArch;
 }
 
-Error Logging::formatTypeId(StringBuilder& sb, uint32_t typeId) noexcept {
+Error Logging::formatTypeId(String& sb, uint32_t typeId) noexcept {
   if (typeId == Type::kIdVoid)
     return sb.appendString("void");
 
@@ -234,25 +231,25 @@ Error Logging::formatTypeId(StringBuilder& sb, uint32_t typeId) noexcept {
 
   uint32_t baseId = Type::baseOf(typeId);
   switch (baseId) {
-    case Type::kIdIntPtr : typeName = "intptr" ; break;
-    case Type::kIdUIntPtr: typeName = "uintptr"; break;
-    case Type::kIdI8     : typeName = "i8"     ; break;
-    case Type::kIdU8     : typeName = "u8"     ; break;
-    case Type::kIdI16    : typeName = "i16"    ; break;
-    case Type::kIdU16    : typeName = "u16"    ; break;
-    case Type::kIdI32    : typeName = "i32"    ; break;
-    case Type::kIdU32    : typeName = "u32"    ; break;
-    case Type::kIdI64    : typeName = "i64"    ; break;
-    case Type::kIdU64    : typeName = "u64"    ; break;
-    case Type::kIdF32    : typeName = "f32"    ; break;
-    case Type::kIdF64    : typeName = "f64"    ; break;
-    case Type::kIdF80    : typeName = "f80"    ; break;
-    case Type::kIdMask8  : typeName = "mask8"  ; break;
-    case Type::kIdMask16 : typeName = "mask16" ; break;
-    case Type::kIdMask32 : typeName = "mask32" ; break;
-    case Type::kIdMask64 : typeName = "mask64" ; break;
-    case Type::kIdMmx32  : typeName = "mmx32"  ; break;
-    case Type::kIdMmx64  : typeName = "mmx64"  ; break;
+    case Type::kIdIntPtr : typeName = "iptr"  ; break;
+    case Type::kIdUIntPtr: typeName = "uptr"  ; break;
+    case Type::kIdI8     : typeName = "i8"    ; break;
+    case Type::kIdU8     : typeName = "u8"    ; break;
+    case Type::kIdI16    : typeName = "i16"   ; break;
+    case Type::kIdU16    : typeName = "u16"   ; break;
+    case Type::kIdI32    : typeName = "i32"   ; break;
+    case Type::kIdU32    : typeName = "u32"   ; break;
+    case Type::kIdI64    : typeName = "i64"   ; break;
+    case Type::kIdU64    : typeName = "u64"   ; break;
+    case Type::kIdF32    : typeName = "f32"   ; break;
+    case Type::kIdF64    : typeName = "f64"   ; break;
+    case Type::kIdF80    : typeName = "f80"   ; break;
+    case Type::kIdMask8  : typeName = "mask8" ; break;
+    case Type::kIdMask16 : typeName = "mask16"; break;
+    case Type::kIdMask32 : typeName = "mask32"; break;
+    case Type::kIdMask64 : typeName = "mask64"; break;
+    case Type::kIdMmx32  : typeName = "mmx32" ; break;
+    case Type::kIdMmx64  : typeName = "mmx64" ; break;
   }
 
   uint32_t baseSize = Type::sizeOf(baseId);
@@ -266,8 +263,8 @@ Error Logging::formatTypeId(StringBuilder& sb, uint32_t typeId) noexcept {
 
 }
 
-#ifndef ASMJIT_DISABLE_BUILDER
-static Error formatFuncValue(StringBuilder& sb, uint32_t flags, const BaseEmitter* emitter, FuncValue value) noexcept {
+#ifndef ASMJIT_NO_BUILDER
+static Error formatFuncValue(String& sb, uint32_t flags, const BaseEmitter* emitter, FuncValue value) noexcept {
   uint32_t typeId = value.typeId();
   ASMJIT_PROPAGATE(Logging::formatTypeId(sb, typeId));
 
@@ -284,7 +281,7 @@ static Error formatFuncValue(StringBuilder& sb, uint32_t flags, const BaseEmitte
 }
 
 static Error formatFuncRets(
-  StringBuilder& sb,
+  String& sb,
   uint32_t flags,
   const BaseEmitter* emitter,
   const FuncDetail& fd,
@@ -297,7 +294,7 @@ static Error formatFuncRets(
     if (i) ASMJIT_PROPAGATE(sb.appendString(", "));
     ASMJIT_PROPAGATE(formatFuncValue(sb, flags, emitter, fd.ret(i)));
 
-    #ifndef ASMJIT_DISABLE_COMPILER
+    #ifndef ASMJIT_NO_COMPILER
     if (vRegs) {
       static const char nullRet[] = "<none>";
       ASMJIT_PROPAGATE(sb.appendFormat(" %s", vRegs[i] ? vRegs[i]->name() : nullRet));
@@ -309,7 +306,7 @@ static Error formatFuncRets(
 }
 
 static Error formatFuncArgs(
-  StringBuilder& sb,
+  String& sb,
   uint32_t flags,
   const BaseEmitter* emitter,
   const FuncDetail& fd,
@@ -323,7 +320,7 @@ static Error formatFuncArgs(
     if (i) ASMJIT_PROPAGATE(sb.appendString(", "));
     ASMJIT_PROPAGATE(formatFuncValue(sb, flags, emitter, fd.arg(i)));
 
-    #ifndef ASMJIT_DISABLE_COMPILER
+    #ifndef ASMJIT_NO_COMPILER
     if (vRegs) {
       static const char nullArg[] = "<none>";
       ASMJIT_PROPAGATE(sb.appendFormat(" %s", vRegs[i] ? vRegs[i]->name() : nullArg));
@@ -335,7 +332,7 @@ static Error formatFuncArgs(
 }
 
 Error Logging::formatNode(
-  StringBuilder& sb,
+  String& sb,
   uint32_t flags,
   const BaseBuilder* cb,
   const BaseNode* node_) noexcept {
@@ -350,6 +347,15 @@ Error Logging::formatNode(
         Logging::formatInstruction(sb, flags, cb,
           cb->archId(),
           node->baseInst(), node->operands(), node->opCount()));
+      break;
+    }
+
+    case BaseNode::kNodeSection: {
+      const SectionNode* node = node_->as<SectionNode>();
+      if (cb->_code->isSectionValid(node->id())) {
+        const Section* section = cb->_code->sectionById(node->id());
+        ASMJIT_PROPAGATE(sb.appendFormat(".section %s", section->name()));
+      }
       break;
     }
 
@@ -375,10 +381,20 @@ Error Logging::formatNode(
       break;
     }
 
-    case BaseNode::kNodeLabelData: {
-      const LabelDataNode* node = node_->as<LabelDataNode>();
+    case BaseNode::kNodeEmbedLabel: {
+      const EmbedLabelNode* node = node_->as<EmbedLabelNode>();
       ASMJIT_PROPAGATE(sb.appendString(".label "));
       ASMJIT_PROPAGATE(formatLabel(sb, flags, cb, node->id()));
+      break;
+    }
+
+    case BaseNode::kNodeEmbedLabelDelta: {
+      const EmbedLabelDeltaNode* node = node_->as<EmbedLabelDeltaNode>();
+      ASMJIT_PROPAGATE(sb.appendString(".label ("));
+      ASMJIT_PROPAGATE(formatLabel(sb, flags, cb, node->id()));
+      ASMJIT_PROPAGATE(sb.appendString(" - "));
+      ASMJIT_PROPAGATE(formatLabel(sb, flags, cb, node->baseId()));
+      ASMJIT_PROPAGATE(sb.appendString(")"));
       break;
     }
 
@@ -406,7 +422,7 @@ Error Logging::formatNode(
       break;
     }
 
-    #ifndef ASMJIT_DISABLE_COMPILER
+    #ifndef ASMJIT_NO_COMPILER
     case BaseNode::kNodeFunc: {
       const FuncNode* node = node_->as<FuncNode>();
 
@@ -454,9 +470,9 @@ Error Logging::formatNode(
 }
 #endif
 
-Error Logging::formatLine(StringBuilder& sb, const uint8_t* binData, size_t binSize, size_t dispSize, size_t immSize, const char* comment) noexcept {
+Error Logging::formatLine(String& sb, const uint8_t* binData, size_t binSize, size_t dispSize, size_t immSize, const char* comment) noexcept {
   size_t currentSize = sb.size();
-  size_t commentSize = comment ? StringUtils::strLen(comment, Globals::kMaxCommentSize) : 0;
+  size_t commentSize = comment ? Support::strLen(comment, Globals::kMaxCommentSize) : 0;
 
   ASMJIT_ASSERT(binSize >= dispSize);
   const size_t kNoBinSize = std::numeric_limits<size_t>::max();
@@ -496,5 +512,4 @@ Error Logging::formatLine(StringBuilder& sb, const uint8_t* binData, size_t binS
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
 #endif

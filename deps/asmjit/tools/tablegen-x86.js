@@ -1,5 +1,5 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
 // Zlib - See LICENSE.md file in the package.
@@ -20,21 +20,24 @@
 
 "use strict";
 
-const commons = require("./tablegen.js");
-const asmdb = commons.asmdb;
-const kIndent = commons.kIndent;
+const core = require("./tablegen.js");
+const asmdb = core.asmdb;
+const kIndent = core.kIndent;
 
-const MapUtils = commons.MapUtils;
-const ArrayUtils = commons.ArrayUtils;
-const StringUtils = commons.StringUtils;
-const IndexedArray = commons.IndexedArray;
+const Lang = core.Lang;
+const CxxUtils = core.CxxUtils;
+const MapUtils = core.MapUtils;
+const ArrayUtils = core.ArrayUtils;
+const StringUtils = core.StringUtils;
+const IndexedArray = core.IndexedArray;
 
 const hasOwn = Object.prototype.hasOwnProperty;
-const padLeft = StringUtils.padLeft;
 const disclaimer = StringUtils.disclaimer;
 
-const FAIL = commons.FAIL;
-const DEBUG = commons.DEBUG;
+const FAIL = core.FAIL;
+const DEBUG = core.DEBUG;
+
+const decToHex = StringUtils.decToHex;
 
 // ============================================================================
 // [tablegen.x86.x86isa]
@@ -44,12 +47,12 @@ const DEBUG = commons.DEBUG;
 const x86isa = new asmdb.x86.ISA({
   instructions: [
     // Imul in [reg, imm] form is encoded as [reg, reg, imm].
-    ["imul"  , "r16, ib"    , "RM"   , "66 6B /r ib"        , "ANY OF=W SF=W ZF=U AF=U PF=U CF=W"],
-    ["imul"  , "r32, ib"    , "RM"   , "6B /r ib"           , "ANY OF=W SF=W ZF=U AF=U PF=U CF=W"],
-    ["imul"  , "r64, ib"    , "RM"   , "REX.W 6B /r ib"     , "X64 OF=W SF=W ZF=U AF=U PF=U CF=W"],
-    ["imul"  , "r16, iw"    , "RM"   , "66 69 /r iw"        , "ANY OF=W SF=W ZF=U AF=U PF=U CF=W"],
-    ["imul"  , "r32, id"    , "RM"   , "69 /r id"           , "ANY OF=W SF=W ZF=U AF=U PF=U CF=W"],
-    ["imul"  , "r64, id"    , "RM"   , "REX.W 69 /r id"     , "X64 OF=W SF=W ZF=U AF=U PF=U CF=W"]
+    ["imul", "r16, ib"    , "RMI"  , "66 6B /r ib"   , "ANY OF=W SF=W ZF=U AF=U PF=U CF=W"],
+    ["imul", "r32, ib"    , "RMI"  , "6B /r ib"      , "ANY OF=W SF=W ZF=U AF=U PF=U CF=W"],
+    ["imul", "r64, ib"    , "RMI"  , "REX.W 6B /r ib", "X64 OF=W SF=W ZF=U AF=U PF=U CF=W"],
+    ["imul", "r16, iw"    , "RMI"  , "66 69 /r iw"   , "ANY OF=W SF=W ZF=U AF=U PF=U CF=W"],
+    ["imul", "r32, id"    , "RMI"  , "69 /r id"      , "ANY OF=W SF=W ZF=U AF=U PF=U CF=W"],
+    ["imul", "r64, id"    , "RMI"  , "REX.W 69 /r id", "X64 OF=W SF=W ZF=U AF=U PF=U CF=W"]
   ]
 });
 
@@ -71,46 +74,54 @@ const RemappedInsts = {
   "outs" : { names: ["outsb", "outsw", "outsd"]         , rep: null  }
 };
 
-// Map of instructions that can use fixed registers, but are also encodable
-// by using any others. This is to simplify some decisions about instruction
-// flags as we don't want to see `FixedReg` in `adc` instruction, for example.
-const NotFixedInsts = MapUtils.arrayToMap([
-  "adc", "add", "and", "cmp", "mov", "or", "sbb", "sub", "test", "xchg", "xor"
-]);
+// ============================================================================
+// [tablegen.x86.Filter]
+// ============================================================================
+
+class Filter {
+  static unique(instArray) {
+    const result = [];
+    const known = {};
+
+    for (var i = 0; i < instArray.length; i++) {
+      const inst = instArray[i];
+      if (inst.attributes.AltForm)
+        continue;
+
+      const s = inst.operands.map((op) => { return op.isImm() ? "imm" : op.toString(); }).join(", ");
+      if (known[s] === true)
+        continue;
+
+      known[s] = true;
+      result.push(inst);
+    }
+
+    return result;
+  }
+
+  static noAltForm(instArray) {
+    const result = [];
+    for (var i = 0; i < instArray.length; i++) {
+      const inst = instArray[i];
+      if (inst.attributes.AltForm)
+        continue;
+      result.push(inst);
+    }
+    return result;
+  }
+
+  static byArch(instArray, arch) {
+    return instArray.filter(function(inst) {
+      return inst.arch === "ANY" || inst.arch === arch;
+    });
+  }
+}
 
 // ============================================================================
 // [tablegen.x86.GenUtils]
 // ============================================================================
 
 class GenUtils {
-  static hasFixedReg(dbInsts) {
-    for (var i = 0; i < dbInsts.length; i++) {
-      const dbInst = dbInsts[i];
-      if (NotFixedInsts[dbInst.name]) continue;
-
-      const operands = dbInst.operands;
-      for (var j = 0; j < operands.length; j++)
-        if (operands[j].isFixedReg())
-          return true;
-    }
-
-    return false;
-  }
-
-  static hasFixedMem(dbInsts) {
-    for (var i = 0; i < dbInsts.length; i++) {
-      const dbInst = dbInsts[i];
-      if (NotFixedInsts[dbInst.name]) continue;
-
-      const operands = dbInst.operands;
-      for (var j = 0; j < operands.length; j++)
-        if (operands[j].isFixedMem())
-          return true;
-    }
-
-    return false;
-  }
-
   static cpuArchOf(dbInsts) {
     var anyArch = false;
     var x86Arch = false;
@@ -123,68 +134,14 @@ class GenUtils {
       if (dbInst.arch === "X64") x64Arch = true;
     }
 
-    return anyArch || (x86Arch && x64Arch) ? "[ANY]" : x86Arch ? "[X86]" : "[X64]";
+    return anyArch || (x86Arch && x64Arch) ? "" : x86Arch ? "(X86)" : "(X64)";
   }
 
   static cpuFeaturesOf(dbInsts) {
     return ArrayUtils.sorted(dbInsts.unionCpuFeatures());
   }
 
-  static specialsOf(dbInsts) {
-    const r = Object.create(null);
-    const w = Object.create(null);
-
-    for (var i = 0; i < dbInsts.length; i++) {
-      const dbInst = dbInsts[i];
-      const specialRegs = dbInst.specialRegs;
-
-      // Mov is a special case, moving to/from control regs makes flags undefined,
-      // which we don't want to have in `X86InstDB::operationData`. This is, thus,
-      // a special case instruction analyzer must deal with.
-      if (dbInst.name === "mov")
-        continue;
-
-      for (var specialReg in specialRegs) {
-        const group = x86isa.specialRegs[specialReg].group;
-        const op = specialRegs[specialReg];
-
-        switch (op) {
-          case "R":
-            r[group] = true;
-            break;
-          case "X":
-            r[group] = true;
-            // ... fallthrough ...
-          case "W":
-          case "U":
-          case "0":
-          case "1":
-            w[group] = true;
-            break;
-        }
-      }
-    }
-
-    return [ArrayUtils.sorted(r), ArrayUtils.sorted(w)];
-  }
-
   static flagsOf(dbInsts) {
-    function getAccess(dbInst) {
-      const operands = dbInst.operands;
-      if (!operands.length) return "";
-
-      if (dbInst.name === "xchg" || dbInst.name === "xadd")
-        return "UseXX";
-
-      const op = operands[0];
-      if (!op.isRegOrMem())
-        return "";
-      else if (op.read && op.write)
-        return "UseX";
-      else
-        return op.read ? "UseR" :"UseW";
-    }
-
     function replace(map, a, b, c) {
       if (map[a] && map[b]) {
         delete map[a];
@@ -197,43 +154,7 @@ class GenUtils {
     var i, j;
 
     var mib = dbInsts.length > 0 && /^(?:bndldx|bndstx)$/.test(dbInsts[0].name);
-    var access = "";
-    var ambiguous = false;
-
-    for (i = 0; i < dbInsts.length; i++) {
-      const dbInst = dbInsts[i];
-      const name = dbInst.name;
-
-      const acc = getAccess(dbInst);
-      if (!access)
-        access = acc;
-      else if (access !== acc)
-        ambiguous = true;
-
-      if (dbInst.attributes.Volatile) f.Volatile = true;
-      if (dbInst.privilege !== "L3") f.Privileged = true;
-    }
-
-    // Default to "RO" if there is no access information nor operands.
-    if (!access) access = "UseR";
-    if (ambiguous) access = "UseA";
-    if (access) {
-      if (access === "UseXX")
-        f.UseX = true;
-      f[access] = true;
-    }
-
     if (mib) f.Mib = true;
-
-    const fixedReg = GenUtils.hasFixedReg(dbInsts);
-    const fixedMem = GenUtils.hasFixedMem(dbInsts);
-
-    if (fixedReg && fixedMem)
-      f.FixedRM = true;
-    else if (fixedReg)
-      f.FixedReg = true;
-    else if (fixedMem)
-      f.FixedMem = true;
 
     var mmx = false;
     var vec = false;
@@ -263,14 +184,14 @@ class GenUtils {
 
     for (i = 0; i < dbInsts.length; i++) {
       const dbInst = dbInsts[i];
-      const name = dbInst.name;
       const operands = dbInst.operands;
 
-      if (dbInst.attributes.Lock    ) f.Lock     = true;
-      if (dbInst.attributes.REP     ) f.Rep      = true;
-      if (dbInst.attributes.REPNE   ) f.Repne    = true;
-      if (dbInst.attributes.XAcquire) f.XAcquire = true;
-      if (dbInst.attributes.XRelease) f.XRelease = true;
+      if (dbInst.attributes.Lock      ) f.Lock       = true;
+      if (dbInst.attributes.XAcquire  ) f.XAcquire   = true;
+      if (dbInst.attributes.XRelease  ) f.XRelease   = true;
+      if (dbInst.attributes.REP       ) f.Rep        = true;
+      if (dbInst.attributes.REPNE     ) f.Rep        = true;
+      if (dbInst.attributes.RepIgnored) f.RepIgnored = true;
 
       if (dbInst.fpu) {
         for (var j = 0; j < operands.length; j++) {
@@ -318,38 +239,6 @@ class GenUtils {
     return Object.getOwnPropertyNames(f);
   }
 
-  static operationFlagsOf(dbInsts) {
-    const f = Object.create(null);
-
-    for (var i = 0; i < dbInsts.length; i++) {
-      const dbInst = dbInsts[i];
-      const name = dbInst.name;
-      const operands = dbInst.operands;
-    }
-
-    return Object.getOwnPropertyNames(f);
-  }
-
-  static specialCasesOf(dbInsts) {
-    const f = Object.create(null);
-
-    for (var i = 0; i < dbInsts.length; i++) {
-      const dbInst = dbInsts[i];
-      const name = dbInst.name;
-      const operands = dbInst.operands;
-
-      // Special case: MOV undefines flags if moving between GP and CR|DR registers.
-      if (name === "mov")
-        f.MovCrDr = true;
-
-      // Special case: MOVSS|MOVSD zeroes the remaining part of destination if source operand is memory.
-      if ((name === "movss" || name === "movsd") && !dbInst.attributes.REP)
-        f.MovSsSd = true;
-    }
-
-    return Object.getOwnPropertyNames(f);
-  }
-
   static eqOps(aOps, aFrom, bOps, bFrom) {
     var x = 0;
     for (;;) {
@@ -377,51 +266,80 @@ class GenUtils {
       case "xchg"    :
 
       case "and"     :
-      case "pand"    : case "vpand"    : case "vpandd"  : case "vpandq"   :
-      case "andpd"   : case "vandpd"   :
-      case "andps"   : case "vandps"   :
+      case "pand"    : case "vpand"  : case "vpandd"  : case "vpandq"   :
+      case "andpd"   : case "vandpd" :
+      case "andps"   : case "vandps" :
 
       case "or"      :
-      case "por"     : case "vpor"     : case "vpord"   : case "vporq"    :
-      case "orpd"    : case "vorpd"    :
-      case "orps"    : case "vorps"    :
+      case "por"     : case "vpor"   : case "vpord"   : case "vporq"    :
+      case "orpd"    : case "vorpd"  :
+      case "orps"    : case "vorps"  :
 
-      case "pminsb"  : case "vpminsb"  : case "pmaxsb"  : case "vpmaxsb"  :
-      case "pminsw"  : case "vpminsw"  : case "pmaxsw"  : case "vpmaxsw"  :
-      case "pminsd"  : case "vpminsd"  : case "pmaxsd"  : case "vpmaxsd"  :
-      case "pminub"  : case "vpminub"  : case "pmaxub"  : case "vpmaxub"  :
-      case "pminuw"  : case "vpminuw"  : case "pmaxuw"  : case "vpmaxuw"  :
-      case "pminud"  : case "vpminud"  : case "pmaxud"  : case "vpmaxud"  :
+      case "pminsb"  : case "vpminsb": case "pmaxsb"  : case "vpmaxsb"  :
+      case "pminsw"  : case "vpminsw": case "pmaxsw"  : case "vpmaxsw"  :
+      case "pminsd"  : case "vpminsd": case "pmaxsd"  : case "vpmaxsd"  :
+      case "pminub"  : case "vpminub": case "pmaxub"  : case "vpmaxub"  :
+      case "pminuw"  : case "vpminuw": case "pmaxuw"  : case "vpmaxuw"  :
+      case "pminud"  : case "vpminud": case "pmaxud"  : case "vpmaxud"  :
         return "RO";
 
-      case "pandn"   : case "vpandn"   : case "vpandnd" : case "vpandnq"  :
+      case "pandn"   : case "vpandn" : case "vpandnd" : case "vpandnq"  :
 
       case "xor"     :
-      case "pxor"    : case "vpxor"    : case "vpxord"  : case "vpxorq"   :
-      case "xorpd"   : case "vxorpd"   :
-      case "xorps"   : case "vxorps"   :
+      case "pxor"    : case "vpxor"  : case "vpxord"  : case "vpxorq"   :
+      case "xorpd"   : case "vxorpd" :
+      case "xorps"   : case "vxorps" :
 
       case "sub"     :
-      case "psubb"   : case "vpsubb"   :
-      case "psubw"   : case "vpsubw"   :
-      case "psubd"   : case "vpsubd"   :
-      case "psubq"   : case "vpsubq"   :
-      case "psubsb"  : case "vpsubsb"  : case "psubusb" : case "vpsubusb" :
-      case "psubsw"  : case "vpsubsw"  : case "psubusw" : case "vpsubusw" :
+      case "psubb"   : case "vpsubb" :
+      case "psubw"   : case "vpsubw" :
+      case "psubd"   : case "vpsubd" :
+      case "psubq"   : case "vpsubq" :
+      case "psubsb"  : case "vpsubsb": case "psubusb" : case "vpsubusb" :
+      case "psubsw"  : case "vpsubsw": case "psubusw" : case "vpsubusw" :
 
-      case "vpcmpeqb": case "pcmpeqb"  : case "vpcmpgtb": case "pcmpgtb"  :
-      case "vpcmpeqw": case "pcmpeqw"  : case "vpcmpgtw": case "pcmpgtw"  :
-      case "vpcmpeqd": case "pcmpeqd"  : case "vpcmpgtd": case "pcmpgtd"  :
-      case "vpcmpeqq": case "pcmpeqq"  : case "vpcmpgtq": case "pcmpgtq"  :
+      case "vpcmpeqb": case "pcmpeqb": case "vpcmpgtb": case "pcmpgtb"  :
+      case "vpcmpeqw": case "pcmpeqw": case "vpcmpgtw": case "pcmpgtw"  :
+      case "vpcmpeqd": case "pcmpeqd": case "vpcmpgtd": case "pcmpgtd"  :
+      case "vpcmpeqq": case "pcmpeqq": case "vpcmpgtq": case "pcmpgtq"  :
 
-      case "vpcmpb"  : case "vpcmpub"  :
-      case "vpcmpd"  : case "vpcmpud"  :
-      case "vpcmpw"  : case "vpcmpuw"  :
-      case "vpcmpq"  : case "vpcmpuq"  :
+      case "vpcmpb"  : case "vpcmpub":
+      case "vpcmpd"  : case "vpcmpud":
+      case "vpcmpw"  : case "vpcmpuw":
+      case "vpcmpq"  : case "vpcmpuq":
         return "WO";
 
       default:
         return "None";
+    }
+  }
+
+  static fixedRegOf(reg) {
+    switch (reg) {
+      case "es"  : return 1;
+      case "cs"  : return 2;
+      case "ss"  : return 3;
+      case "ds"  : return 4;
+      case "fs"  : return 5;
+      case "gs"  : return 6;
+      case "ah"  : return 0;
+      case "ch"  : return 1;
+      case "dh"  : return 2;
+      case "bh"  : return 3;
+      case "al"  : case "ax": case "eax": case "rax": case "zax": return 0;
+      case "cl"  : case "cx": case "ecx": case "rcx": case "zcx": return 1;
+      case "dl"  : case "dx": case "edx": case "rdx": case "zdx": return 2;
+      case "bl"  : case "bx": case "ebx": case "rbx": case "zbx": return 3;
+      case "spl" : case "sp": case "esp": case "rsp": case "zsp": return 4;
+      case "bpl" : case "bp": case "ebp": case "rbp": case "zbp": return 5;
+      case "sil" : case "si": case "esi": case "rsi": case "zsi": return 6;
+      case "dil" : case "di": case "edi": case "rdi": case "zdi": return 7;
+      case "st0" : return 0;
+      case "xmm0": return 0;
+      case "ymm0": return 0;
+      case "zmm0": return 0;
+      default:
+        return -1;
     }
   }
 
@@ -438,7 +356,7 @@ class GenUtils {
 // [tablegen.x86.X86TableGen]
 // ============================================================================
 
-class X86TableGen extends commons.TableGen {
+class X86TableGen extends core.TableGen {
   constructor() {
     super("X86");
   }
@@ -469,16 +387,16 @@ class X86TableGen extends commons.TableGen {
     const data = this.dataOfFile("src/asmjit/x86/x86instdb.cpp");
     const re = new RegExp(
       "INST\\(" +
-        "([A-Za-z0-9_]+)\\s*"              + "," + // [01] Instruction.
-        "([^,]+)"                          + "," + // [02] Encoding.
-        "(.{26}[^,]*)"                     + "," + // [03] Opcode[0].
-        "(.{26}[^,]*)"                     + "," + // [04] Opcode[1].
-        "([^,]+)"                          + "," + // [05] Write-Index.
-        "([^,]+)"                          + "," + // [06] Write-Size.
+        "([A-Za-z0-9_]+)\\s*"              + "," +  // [01] Instruction.
+        "([^,]+)"                          + "," +  // [02] Encoding.
+        "(.{26}[^,]*)"                     + "," +  // [03] Opcode[0].
+        "(.{26}[^,]*)"                     + "," +  // [04] Opcode[1].
         // --- autogenerated fields ---
-        "([^\\)]+)"                        + "," + // [07] NameIndex.
-        "([^\\)]+)"                        + "," + // [08] CommonDataIndex.
-        "([^\\)]+)"                        + "\\)",// [09] OperationDataIndex.
+        "([^\\)]+)"                        + "," +  // [05] MainOpcodeIndex.
+        "([^\\)]+)"                        + "," +  // [06] AltOpcodeIndex.
+        "([^\\)]+)"                        + "," +  // [07] NameIndex.
+        "([^\\)]+)"                        + "," +  // [08] CommonDataIndex.
+        "([^\\)]+)"                        + "\\)", // [09] OperationDataIndex.
       "g");
 
     var m;
@@ -488,8 +406,6 @@ class X86TableGen extends commons.TableGen {
       var encoding    = m[2].trim();
       var opcode0     = m[3].trim();
       var opcode1     = m[4].trim();
-      var writeIndex  = StringUtils.trimLeft(m[5]);
-      var writeSize   = StringUtils.trimLeft(m[6]);
 
       const dbInsts = this.query(name);
       if (name && !dbInsts.length)
@@ -498,7 +414,6 @@ class X86TableGen extends commons.TableGen {
       const flags         = GenUtils.flagsOf(dbInsts);
       const controlType   = GenUtils.controlType(dbInsts);
       const singleRegCase = GenUtils.singleRegCase(name);
-      const specialCases  = GenUtils.specialCasesOf(dbInsts);
 
       this.addInst({
         id                : 0,             // Instruction id (numeric value).
@@ -509,20 +424,16 @@ class X86TableGen extends commons.TableGen {
         opcode0           : opcode0,       // Primary opcode.
         opcode1           : opcode1,       // Secondary opcode.
         flags             : flags,
-        writeIndex        : writeIndex,
-        writeSize         : writeSize,
         signatures        : null,          // Instruction signatures.
         controlType       : controlType,
         singleRegCase     : singleRegCase,
-        specialCases      : specialCases,
 
-        nameIndex         : -1,            // Instruction name-index.
-        altOpCodeIndex    : -1,            // Index to X86InstDB::altOpCodeTable.
-        commonDataIndex   : -1,
-        operationDataIndex: -1,
-
-        rwInfoIndex       : -1,
-        rwInfoCount       : -1,
+        mainOpcodeValue   : -1,            // Main opcode value (0.255 hex).
+        mainOpcodeIndex   : -1,            // Index to InstDB::_mainOpcodeTable.
+        altOpcodeIndex    : -1,            // Index to InstDB::_altOpcodeTable.
+        nameIndex         : -1,            // Index to InstDB::_nameData.
+        commonInfoIndexA  : -1,
+        commomInfoIndexB  : -1,
 
         signatureIndex    : -1,
         signatureCount    : -1
@@ -538,24 +449,23 @@ class X86TableGen extends commons.TableGen {
   merge() {
     var s = StringUtils.format(this.insts, "", true, function(inst) {
       return "INST(" +
-        padLeft(inst.enum              , 16) + ", " +
-        padLeft(inst.encoding          , 19) + ", " +
-        padLeft(inst.opcode0           , 26) + ", " +
-        padLeft(inst.opcode1           , 26) + ", " +
-        padLeft(inst.writeIndex        ,  1) + ", " +
-        padLeft(inst.writeSize         ,  1) + ", " +
-        padLeft(inst.nameIndex         ,  4) + ", " +
-        padLeft(inst.commonDataIndex   ,  3) + ", " +
-        padLeft(inst.operationDataIndex,  3) + ")";
+        String(inst.enum            ).padEnd(17) + ", " +
+        String(inst.encoding        ).padEnd(19) + ", " +
+        String(inst.opcode0         ).padEnd(26) + ", " +
+        String(inst.opcode1         ).padEnd(26) + ", " +
+        String(inst.mainOpcodeIndex ).padEnd( 3) + ", " +
+        String(inst.altOpcodeIndex  ).padEnd( 3) + ", " +
+        String(inst.nameIndex       ).padEnd( 5) + ", " +
+        String(inst.commonInfoIndexA).padEnd( 3) + ", " +
+        String(inst.commomInfoIndexB).padEnd( 3) + ")";
     }) + "\n";
-    this.inject("InstInfo", s, this.insts.length * 4);
+    this.inject("InstInfo", s, this.insts.length * 8);
   }
 
   // --------------------------------------------------------------------------
   // [Other]
   // --------------------------------------------------------------------------
 
-  /*
   printMissing() {
     const ignored = MapUtils.arrayToMap([
       "cmpsb", "cmpsw", "cmpsd", "cmpsq",
@@ -576,16 +486,13 @@ class X86TableGen extends commons.TableGen {
         var inst = this.newInstFromGroup(dbInsts);
         if (inst) {
           out += "  INST(" +
-            padLeft(inst.enum      , 16) + ", " +
-            padLeft(inst.encoding  , 23) + ", " +
-            padLeft(inst.opcode0   , 26) + ", " +
-            padLeft(inst.opcode1   , 26) + ", " +
-            padLeft(inst.writeIndex,  2) + ", " +
-            padLeft(inst.writeSize ,  2) + ", " +
-            padLeft("0"            ,  4) + ", " +
-            padLeft("0"            ,  3) + ", " +
-            padLeft("0"            ,  3) + ", " +
-            padLeft("0"            ,  3) + "),\n";
+            String(inst.enum      ).padEnd(17) + ", " +
+            String(inst.encoding  ).padEnd(19) + ", " +
+            String(inst.opcode0   ).padEnd(26) + ", " +
+            String(inst.opcode1   ).padEnd(26) + ", " +
+            String("0"            ).padEnd( 4) + ", " +
+            String("0"            ).padEnd( 3) + ", " +
+            String("0"            ).padEnd( 3) + "),\n";
         }
       }
     }, this);
@@ -610,48 +517,74 @@ class X86TableGen extends commons.TableGen {
         return "WO";
     }
 
-    var dbInst = dbInsts[0];
+    function isVecPrefix(s) {
+      return s === "VEX" || s === "EVEX" || s === "XOP";
+    }
+
+    var dbi = dbInsts[0];
 
     var id       = this.insts.length;
-    var name     = dbInst.name;
+    var name     = dbi.name;
     var enum_    = name[0].toUpperCase() + name.substr(1);
 
-    var opcode   = dbInst.opcodeHex;
-    var rm       = dbInst.rm;
-    var mm       = dbInst.mm;
-    var pp       = dbInst.pp;
-    var encoding = dbInst.encoding;
-    var prefix   = dbInst.prefix;
+    var opcode   = dbi.opcodeHex;
+    var rm       = dbi.rm;
+    var mm       = dbi.mm;
+    var pp       = dbi.pp;
+    var encoding = dbi.encoding;
+    var isVec    = isVecPrefix(dbi.prefix);
 
-    var access   = GetAccess(dbInst);
+    var access   = GetAccess(dbi);
 
     var vexL     = undefined;
     var vexW     = undefined;
     var evexW    = undefined;
 
-    for (var i = 1; i < dbInsts.length; i++) {
-      dbInst = dbInsts[i];
+    for (var i = 0; i < dbInsts.length; i++) {
+      dbi = dbInsts[i];
 
-      if (opcode   !== dbInst.opcode    ) return null;
-      if (rm       !== dbInst.rm        ) return null;
-      if (mm       !== dbInst.mm        ) return null;
-      if (pp       !== dbInst.pp        ) return null;
-      if (encoding !== dbInst.encoding  ) return null;
-      if (prefix   !== dbInst.prefix    ) return null;
-      if (access   !== GetAccess(dbInst)) return null;
+      if (dbi.prefix === "VEX" || dbi.prefix === "XOP") {
+        var newVexL = String(dbi.l === "128" ? 0 : dbi.l === "256" ? 1 : dbi.l === "512" ? 2 : "_");
+        var newVexW = String(dbi.w === "W0" ? 0 : dbi.w === "W1" ? 1 : "_");
+
+        if (vexL !== undefined && vexL !== newVexL)
+          vexL = "x";
+        else
+          vexL = newVexL;
+        if (vexW !== undefined && vexW !== newVexW)
+          vexW = "x";
+        else
+          vexW = newVexW;
+      }
+
+      if (dbi.prefix === "EVEX") {
+        var newEvexW = String(dbi.w === "W0" ? 0 : dbi.w === "W1" ? 1 : "_");
+        if (evexW !== undefined && evexW !== newEvexW)
+          evexW = "x";
+        else
+          evexW = newEvexW;
+      }
+
+      if (opcode   !== dbi.opcodeHex ) { console.log(`ISSUE: Opcode ${opcode} != ${dbi.opcodeHex}`); return null; }
+      if (rm       !== dbi.rm        ) { console.log(`ISSUE: RM ${rm} != ${dbi.rm}`); return null; }
+      if (mm       !== dbi.mm        ) { console.log(`ISSUE: MM ${mm} != ${dbi.mm}`); return null; }
+      if (pp       !== dbi.pp        ) { console.log(`ISSUE: PP ${pp} != ${dbi.pp}`); return null; }
+      if (encoding !== dbi.encoding  ) { console.log(`ISSUE: Enc ${encoding} != ${dbi.encoding}`); return null; }
+      if (access   !== GetAccess(dbi)) { console.log(`ISSUE: Access ${access} != ${GetAccess(dbi)}`); return null; }
+      if (isVec    != isVecPrefix(dbi.prefix)) { console.log(`ISSUE: Vex/Non-Vex mismatch`); return null; }
     }
 
-    var ppmm = padLeft(pp, 2).replace(/ /g, "0") +
-               padLeft(mm, 4).replace(/ /g, "0") ;
+    var ppmm = pp.padEnd(2).replace(/ /g, "0") +
+               mm.padEnd(4).replace(/ /g, "0") ;
 
     var composed = composeOpCode({
-      type  : prefix === "VEX" || prefix === "EVEX" ? "V" : "O",
+      type  : isVec ? "V" : "O",
       prefix: ppmm,
       opcode: opcode,
       o     : rm === "r" ? "_" : (rm ? rm : "_"),
       l     : vexL !== undefined ? vexL : "_",
       w     : vexW !== undefined ? vexW : "_",
-      ew    : evexW !== undefined ? vexEW : "_",
+      ew    : evexW !== undefined ? evexW : "_",
       en    : "_",
       tt    : "_  "
     });
@@ -663,14 +596,11 @@ class X86TableGen extends commons.TableGen {
       encoding          : encoding,
       opcode0           : composed,
       opcode1           : "0",
-      writeIndex        : "0",
-      writeSize         : "0",
       nameIndex         : -1,
-      commonDataIndex   : -1,
-      operationDataIndex: -1
+      commonInfoIndexA  : -1,
+      commomInfoIndexB  : -1
     };
   }
-  */
 
   // --------------------------------------------------------------------------
   // [Hooks]
@@ -681,7 +611,7 @@ class X86TableGen extends commons.TableGen {
       "src/asmjit/x86/x86globals.h",
       "src/asmjit/x86/x86instdb.cpp",
       "src/asmjit/x86/x86instdb.h",
-      "src/asmjit/x86/x86ssetoavx.cpp"
+      "src/asmjit/x86/x86instdb_p.h"
     ]);
     this.parse();
   }
@@ -690,6 +620,8 @@ class X86TableGen extends commons.TableGen {
     this.merge();
     this.save();
     this.dumpTableSizes();
+
+    this.printMissing();
   }
 }
 
@@ -697,30 +629,47 @@ class X86TableGen extends commons.TableGen {
 // [tablegen.x86.IdEnum]
 // ============================================================================
 
-class IdEnum extends commons.IdEnum {
+class IdEnum extends core.IdEnum {
   constructor() {
     super("IdEnum");
   }
 
   comment(inst) {
-    var dbInsts = inst.dbInsts;
-    if (!dbInsts.length) return "";
+    function filterAVX(features, avx) {
+      return features.filter(function(item) { return /^(AVX|FMA)/.test(item) === avx; });
+    }
 
-    var text = GenUtils.cpuArchOf(dbInsts);
+    var dbInsts = inst.dbInsts;
+    if (!dbInsts.length) return "Invalid instruction id.";
+
+    var text = "";
     var features = GenUtils.cpuFeaturesOf(dbInsts);
 
     if (features.length) {
-      text += " {";
+      text += "{";
+      const avxFeatures = filterAVX(features, true);
+      const otherFeatures = filterAVX(features, false);
 
-      const vl = features.indexOf("AVX512_VL");
-      if (vl !== -1) features.splice(vl, 1);
-      text += features.join("|");
+      const vl = avxFeatures.indexOf("AVX512_VL");
+      if (vl !== -1) avxFeatures.splice(vl, 1);
+
+      const fma = avxFeatures.indexOf("FMA");
+      if (fma !== -1) { avxFeatures.splice(fma, 1); avxFeatures.splice(0, 0, "FMA"); }
+
+      text += avxFeatures.join("|");
       if (vl !== -1) text += "+VL";
+
+      if (otherFeatures.length)
+        text += (avxFeatures.length ? " & " : "") + otherFeatures.join("|");
 
       text += "}";
     }
 
-    return text;
+    var arch = GenUtils.cpuArchOf(dbInsts);
+    if (arch)
+      text += (text ? " " : "") + arch;
+
+    return `Instruction '${inst.name}'${(text ? " " + text : "")}.`;
   }
 }
 
@@ -728,51 +677,9 @@ class IdEnum extends commons.IdEnum {
 // [tablegen.x86.NameTable]
 // ============================================================================
 
-class NameTable extends commons.NameTable {
+class NameTable extends core.NameTable {
   constructor() {
     super("NameTable");
-  }
-}
-
-// ============================================================================
-// [tablegen.x86.EncodingTable]
-// ============================================================================
-
-class EncodingTable extends commons.Task {
-  constructor() {
-    super("EncodingTable");
-  }
-
-  run() {
-    const insts = this.ctx.insts;
-    const table = insts.map((inst) => { return inst.encoding; });
-
-    function map(encoding) { return `E(${encoding})`; }
-
-    this.inject("EncodingTable",
-                disclaimer(`#define E(VAL) InstDB::kEncoding##VAL\n` +
-                           `const uint8_t InstDB::_encodingTable[] = {\n${StringUtils.format(table, kIndent, -1, map)}\n};\n` +
-                           `#undef E\n`),
-                table.length * 1);
-  }
-}
-
-// ============================================================================
-// [tablegen.x86.MainOpcodeTable]
-// ============================================================================
-
-class MainOpcodeTable extends commons.Task {
-  constructor() {
-    super("MainOpcodeTable");
-  }
-
-  run() {
-    const insts = this.ctx.insts;
-    const table = insts.map((inst) => { return padLeft(inst.opcode0, 26) });
-
-    this.inject("MainOpcodeTable",
-                disclaimer(`const uint32_t InstDB::_mainOpcodeTable[] = {\n${StringUtils.format(table, kIndent, true)}\n};\n`),
-                table.length * 4);
   }
 }
 
@@ -780,31 +687,69 @@ class MainOpcodeTable extends commons.Task {
 // [tablegen.x86.AltOpcodeTable]
 // ============================================================================
 
-class AltOpcodeTable extends commons.Task {
+class AltOpcodeTable extends core.Task {
   constructor() {
     super("AltOpcodeTable");
   }
 
   run() {
     const insts = this.ctx.insts;
-    const table = new IndexedArray();
-    const index = insts.map((inst) => { return table.addIndexed(padLeft(inst.opcode1, 26)); });
 
-    this.inject("AltOpcodeIndex",
-                disclaimer(`const uint8_t InstDB::_altOpcodeIndex[] = {\n${StringUtils.format(index, kIndent, -1)}\n};\n`),
-                index.length * 1);
+    const mainOpcodeTable = new IndexedArray();
+    const altOpcodeTable = new IndexedArray();
+
+    mainOpcodeTable.addIndexed("O(000000,00,0,0,0,0,0,_  )");
+
+    function indexOpcode(opcode) {
+      if (opcode === "0")
+        return ["00", 0];
+
+      // O_FPU(__,__OP,_)
+      if (opcode.startsWith("O_FPU(")) {
+        var value = opcode.substring(11, 13);
+        var remaining = opcode.substring(0, 11) + "00" + opcode.substring(13);
+
+        return [value, mainOpcodeTable.addIndexed(remaining.padEnd(26))];
+      }
+
+      // X(______,OP,_,_,_,_,_,_  )
+      if (opcode.startsWith("O_FPU(") || opcode.startsWith("O(") || opcode.startsWith("V(")) {
+        var value = opcode.substring(9, 11);
+        var remaining = opcode.substring(0, 9) + "00" + opcode.substring(11);
+
+        remaining = remaining.replace(/,[_xI],/g, ",0,");
+        remaining = remaining.replace(/,[_xI],/g, ",0,");
+        return [value, mainOpcodeTable.addIndexed(remaining.padEnd(26))];
+      }
+
+      FAIL(`Failed to process opcode '${opcode}'`);
+    }
+
+    insts.map((inst) => {
+      const [value, index] = indexOpcode(inst.opcode0);
+      inst.mainOpcodeValue = value;
+      inst.mainOpcodeIndex = index;
+      inst.altOpcodeIndex = altOpcodeTable.addIndexed(inst.opcode1.padEnd(26));
+    });
+    // console.log(mainOpcodeTable.length);
+    // console.log(StringUtils.format(mainOpcodeTable, kIndent, true));
+
+    this.inject("MainOpcodeTable",
+                disclaimer(`const uint32_t InstDB::_mainOpcodeTable[] = {\n${StringUtils.format(mainOpcodeTable, kIndent, true)}\n};\n`),
+                mainOpcodeTable.length * 4);
 
     this.inject("AltOpcodeTable",
-                disclaimer(`const uint32_t InstDB::_altOpcodeTable[] = {\n${StringUtils.format(table, kIndent, true)}\n};\n`),
-                table.length * 4);
+                disclaimer(`const uint32_t InstDB::_altOpcodeTable[] = {\n${StringUtils.format(altOpcodeTable, kIndent, true)}\n};\n`),
+                altOpcodeTable.length * 4);
   }
 }
 
 // ============================================================================
 // [tablegen.x86.SseToAvxTable]
 // ============================================================================
-
-class InstSseToAvxTable extends commons.Task {
+/*
+// Removed from asmjit.
+class InstSseToAvxTable extends core.Task {
   constructor() {
     super("InstSseToAvxTable", ["IdEnum"]);
   }
@@ -816,7 +761,7 @@ class InstSseToAvxTable extends commons.Task {
     const indexTable = [];
 
     function add(data) {
-      return dataTable.addIndexed("{ " + padLeft(`SseToAvxData::kMode${data.mode}`, 28) + ", " + padLeft(String(data.delta), 4) + " }");
+      return dataTable.addIndexed("{ " + `SseToAvxData::kMode${data.mode}`.padEnd(28) + ", " + String(data.delta).padEnd(4) + " }");
     }
 
     // This will receive a zero index, which means that no SseToAvx or AvxToSSe translation is possible.
@@ -929,6 +874,7 @@ class InstSseToAvxTable extends commons.Task {
     return data;
   }
 }
+*/
 
 // ============================================================================
 // [tablegen.x86.InstSignatureTable]
@@ -938,14 +884,14 @@ const RegOp = MapUtils.arrayToMap(["al", "ah", "ax", "eax", "rax", "cl", "r8lo",
 const MemOp = MapUtils.arrayToMap(["m8", "m16", "m32", "m48", "m64", "m80", "m128", "m256", "m512", "m1024"]);
 
 const cmpOp = StringUtils.makePriorityCompare([
-  "implicit",
   "r8lo", "r8hi", "r16", "r32", "r64", "xmm", "ymm", "zmm", "mm", "k", "sreg", "creg", "dreg", "st", "bnd",
   "mem", "vm", "m8", "m16", "m32", "m48", "m64", "m80", "m128", "m256", "m512", "m1024",
   "mib",
   "vm32x", "vm32y", "vm32z", "vm64x", "vm64y", "vm64z",
   "memBase", "memES", "memDS",
   "i4", "u4", "i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64",
-  "rel8", "rel32"
+  "rel8", "rel32",
+  "implicit"
 ]);
 
 const OpToAsmJitOp = {
@@ -1070,13 +1016,6 @@ class OSignature {
   simplify() {
     const flags = this.flags;
 
-    // Implicit register when also any other register can be specified.
-    if (flags.al  && flags.r8lo) delete flags["al"];
-    if (flags.ah  && flags.r8hi) delete flags["ah"];
-    if (flags.ax  && flags.r16 ) delete flags["ax"];
-    if (flags.eax && flags.r32 ) delete flags["eax"];
-    if (flags.rax && flags.r64 ) delete flags["rax"];
-
     // 32-bit register or 16-bit memory implies also 16-bit reg.
     if (flags.r32 && flags.m16) {
       flags.r16 = true;
@@ -1154,11 +1093,12 @@ class OSignature {
         case "mib"     : mFlags.mem = true; mMemFlags.mib   = true; break;
         case "mem"     : mFlags.mem = true; mMemFlags.mAny  = true; break;
 
+        case "memBase" : mFlags.mem = true; mMemFlags.memBase = true; break;
         case "memDS"   : mFlags.mem = true; mMemFlags.memDS = true; break;
         case "memES"   : mFlags.mem = true; mMemFlags.memES = true; break;
-        case "memZAX"  : mFlags.mem = true; sRegMask |= 1 << 0; mMemFlags.memBase = true; break;
-        case "memZSI"  : mFlags.mem = true; sRegMask |= 1 << 6; mMemFlags.memBase = true; break;
-        case "memZDI"  : mFlags.mem = true; sRegMask |= 1 << 7; mMemFlags.memBase = true; break;
+        case "memZAX"  : mFlags.mem = true; sRegMask |= 1 << 0; break;
+        case "memZSI"  : mFlags.mem = true; sRegMask |= 1 << 6; break;
+        case "memZDI"  : mFlags.mem = true; sRegMask |= 1 << 7; break;
 
         case "vm32x"   : mFlags.vm = true; mMemFlags.vm32x = true; break;
         case "vm32y"   : mFlags.vm = true; mMemFlags.vm32y = true; break;
@@ -1204,11 +1144,6 @@ class OSignature {
             case "ax"    : mFlags.r16  = true; sRegMask |= 1 << 0; break;
             case "eax"   : mFlags.r32  = true; sRegMask |= 1 << 0; break;
             case "rax"   : mFlags.r64  = true; sRegMask |= 1 << 0; break;
-            case "bl"    : mFlags.r8lo = true; sRegMask |= 1 << 3; break;
-            case "bh"    : mFlags.r8hi = true; sRegMask |= 1 << 3; break;
-            case "bx"    : mFlags.r16  = true; sRegMask |= 1 << 3; break;
-            case "ebx"   : mFlags.r32  = true; sRegMask |= 1 << 3; break;
-            case "rbx"   : mFlags.r64  = true; sRegMask |= 1 << 3; break;
             case "cl"    : mFlags.r8lo = true; sRegMask |= 1 << 1; break;
             case "ch"    : mFlags.r8hi = true; sRegMask |= 1 << 1; break;
             case "cx"    : mFlags.r16  = true; sRegMask |= 1 << 1; break;
@@ -1219,6 +1154,11 @@ class OSignature {
             case "dx"    : mFlags.r16  = true; sRegMask |= 1 << 2; break;
             case "edx"   : mFlags.r32  = true; sRegMask |= 1 << 2; break;
             case "rdx"   : mFlags.r64  = true; sRegMask |= 1 << 2; break;
+            case "bl"    : mFlags.r8lo = true; sRegMask |= 1 << 3; break;
+            case "bh"    : mFlags.r8hi = true; sRegMask |= 1 << 3; break;
+            case "bx"    : mFlags.r16  = true; sRegMask |= 1 << 3; break;
+            case "ebx"   : mFlags.r32  = true; sRegMask |= 1 << 3; break;
+            case "rbx"   : mFlags.r64  = true; sRegMask |= 1 << 3; break;
             case "si"    : mFlags.r16  = true; sRegMask |= 1 << 6; break;
             case "esi"   : mFlags.r32  = true; sRegMask |= 1 << 6; break;
             case "rsi"   : mFlags.r64  = true; sRegMask |= 1 << 6; break;
@@ -1239,7 +1179,7 @@ class OSignature {
     const sMemFlags = StringifyArray(ArrayUtils.sorted(mMemFlags, cmpOp), OpToAsmJitOp);
     const sExtFlags = StringifyArray(ArrayUtils.sorted(mExtFlags, cmpOp), OpToAsmJitOp);
 
-    return `ROW(${sFlags || 0}, ${sMemFlags || 0}, ${sExtFlags || 0}, ${StringUtils.decToHex(sRegMask, 2)})`;
+    return `ROW(${sFlags || 0}, ${sMemFlags || 0}, ${sExtFlags || 0}, ${decToHex(sRegMask, 2)})`;
   }
 }
 
@@ -1472,7 +1412,7 @@ class SignatureArray extends Array {
   }
 }
 
-class InstSignatureTable extends commons.Task {
+class InstSignatureTable extends core.Task {
   constructor() {
     super("InstSignatureTable");
 
@@ -1489,7 +1429,7 @@ class InstSignatureTable extends commons.Task {
     const insts = this.ctx.insts;
 
     insts.forEach((inst) => {
-      inst.signatures = this.makeSignatures(inst.dbInsts);
+      inst.signatures = this.makeSignatures(Filter.noAltForm(inst.dbInsts));
       this.maxOpRows = Math.max(this.maxOpRows, inst.signatures.length);
     });
 
@@ -1571,12 +1511,12 @@ class InstSignatureTable extends commons.Task {
                 index = oSignatureMap[h];
               }
 
-              signatureEntry += `, ${padLeft(index, 3)}`;
+              signatureEntry += `, ${String(index).padEnd(3)}`;
               x++;
             }
 
             while (x < 6) {
-              signatureEntry += `, ${padLeft(0, 3)}`;
+              signatureEntry += `, ${String(0).padEnd(3)}`;
               x++;
             }
 
@@ -1598,8 +1538,8 @@ class InstSignatureTable extends commons.Task {
     }
 
     var s = `#define ROW(count, x86, x64, implicit, o0, o1, o2, o3, o4, o5)  \\\n` +
-            `  { count, (x86 ? uint8_t(InstDB::kArchMaskX86) : uint8_t(0)) | \\\n` +
-            `           (x64 ? uint8_t(InstDB::kArchMaskX64) : uint8_t(0)) , \\\n` +
+            `  { count, (x86 ? uint8_t(InstDB::kModeX86) : uint8_t(0)) |     \\\n` +
+            `           (x64 ? uint8_t(InstDB::kModeX64) : uint8_t(0)) ,     \\\n` +
             `    implicit,                                                   \\\n` +
             `    0,                                                          \\\n` +
             `    { o0, o1, o2, o3, o4, o5 }                                  \\\n` +
@@ -1618,9 +1558,7 @@ class InstSignatureTable extends commons.Task {
   }
 
   makeSignatures(dbInsts) {
-    const blackList = this.opBlackList;
     const signatures = new SignatureArray();
-
     for (var i = 0; i < dbInsts.length; i++) {
       const inst = dbInsts[i];
       const ops = inst.operands;
@@ -1698,12 +1636,16 @@ class InstSignatureTable extends commons.Task {
             op.flags.implicit = true;
           }
 
-          if (iop.memSeg) {
-            if (iop.memSeg === "ds") op.flags.memDS = true;
-            if (iop.memSeg === "es") op.flags.memES = true;
-            if (reg === "zax") op.flags.memZAX = true;
-            if (reg === "zsi") op.flags.memZSI = true;
-            if (reg === "zdi") op.flags.memZDI = true;
+          const seg = iop.memSeg;
+          if (seg) {
+            if (seg === "ds") op.flags.memDS = true;
+            if (seg === "es") op.flags.memES = true;
+            if (reg === "reg") { op.flags.memBase = true; }
+            if (reg === "r32") { op.flags.memBase = true; }
+            if (reg === "r64") { op.flags.memBase = true; }
+            if (reg === "zax") { op.flags.memBase = true; op.flags.memZAX = true; }
+            if (reg === "zsi") { op.flags.memBase = true; op.flags.memZSI = true; }
+            if (reg === "zdi") { op.flags.memBase = true; op.flags.memZDI = true; }
           }
           else if (reg) {
             op.flags[reg] = true;
@@ -1741,47 +1683,104 @@ class InstSignatureTable extends commons.Task {
 }
 
 // ============================================================================
-// [tablegen.x86.InstExecutionTable]
+// [tablegen.x86.InstCommonInfoTableB]
 // ============================================================================
 
-class InstExecutionTable extends commons.Task {
+class InstCommonInfoTableB extends core.Task {
   constructor() {
-    super("InstExecutionTable");
+    super("InstCommonInfoTableB");
   }
 
   run() {
     const insts = this.ctx.insts;
-    const table = new IndexedArray();
+    const commonTableB = new IndexedArray();
+    const rwInfoTable = new IndexedArray();
+
+    // If the instruction doesn't read any flags it should point to the first index.
+    rwInfoTable.addIndexed(`{ 0, 0 }`);
 
     insts.forEach((inst) => {
       const dbInsts = inst.dbInsts;
 
-      var opFlags = GenUtils.operationFlagsOf(dbInsts).map(function(f) { return `F(${f})`; });
-      if (!opFlags.length) opFlags.push("0");
+      var features = GenUtils.cpuFeaturesOf(dbInsts).map(function(f) { return `EXT(${f})`; }).join(", ");
+      if (!features) features = "0";
 
-      var features = GenUtils.cpuFeaturesOf(dbInsts).map(function(f) { return `FEATURE(${f})`; });
-      if (!features.length) features.push("0");
+      var [r, w] = this.rwFlagsOf(dbInsts);
+      const rData = r.map(function(flag) { return `FLAG(${flag})`; }).join(" | ") || "0";
+      const wData = w.map(function(flag) { return `FLAG(${flag})`; }).join(" | ") || "0";
+      const rwDataIndex = rwInfoTable.addIndexed(`{ ${rData}, ${wData} }`);
 
-      var [r, w] = GenUtils.specialsOf(dbInsts);
-      r = r.map(function(item) { return `SPECIAL(${item.replace(".", "_")})`; });
-      w = w.map(function(item) { return `SPECIAL(${item.replace(".", "_")})`; });
-
-      const opFlagsStr = opFlags.join(" | ");
-      const featuresStr = features.join(", ");
-      const rStr = r.join(" | ") || "0";
-      const wStr = w.join(" | ") || "0";
-
-      inst.operationDataIndex = table.addIndexed(`{ ${opFlagsStr}, { ${featuresStr} }, ${rStr}, ${wStr} }`);
+      inst.commomInfoIndexB = commonTableB.addIndexed(`{ { ${features} }, ${rwDataIndex}, 0 }`);
     });
 
-    var s = `#define OP_FLAG(VAL) uint32_t(InstInfo::kOperation##VAL)\n` +
-            `#define FEATURE(VAL) uint32_t(Features::k##VAL)\n` +
-            `#define SPECIAL(VAL) uint32_t(kSpecialReg_##VAL)\n` +
-            `const InstDB::ExecutionInfo InstDB::_executionInfoTable[] = {\n${StringUtils.format(table, kIndent, true)}\n};\n` +
-            `#undef SPECIAL\n` +
-            `#undef FEATURE\n` +
-            `#undef OP_FLAG\n` ;
-    this.inject("InstExecutionTable", disclaimer(s), table.length * 16);
+    var s = `#define EXT(VAL) uint32_t(Features::k##VAL)\n` +
+            `const InstDB::CommonInfoTableB InstDB::_commonInfoTableB[] = {\n${StringUtils.format(commonTableB, kIndent, true)}\n};\n` +
+            `#undef EXT\n` +
+            `\n` +
+            `#define FLAG(VAL) uint32_t(Status::k##VAL)\n` +
+            `const InstDB::RWFlagsInfoTable InstDB::_rwFlagsInfoTable[] = {\n${StringUtils.format(rwInfoTable, kIndent, true)}\n};\n` +
+            `#undef FLAG\n`;
+    this.inject("InstCommonInfoTableB", disclaimer(s), commonTableB.length * 8 + rwInfoTable.length * 8);
+  }
+
+  rwFlagsOf(dbInsts) {
+    const r = Object.create(null);
+    const w = Object.create(null);
+
+    for (var i = 0; i < dbInsts.length; i++) {
+      const dbInst = dbInsts[i];
+
+      // Omit special cases, this is handled well in C++ code.
+      if (dbInst.name === "mov")
+        continue;
+
+      const specialRegs = dbInst.specialRegs;
+
+      // Mov is a special case, moving to/from control regs makes flags undefined,
+      // which we don't want to have in `X86InstDB::operationData`. This is, thus,
+      // a special case instruction analyzer must deal with.
+      if (dbInst.name === "mov")
+        continue;
+
+      for (var specialReg in specialRegs) {
+        var flag = "";
+        switch (specialReg) {
+          case "FLAGS.CF": flag = "CF"; break;
+          case "FLAGS.OF": flag = "OF"; break;
+          case "FLAGS.SF": flag = "SF"; break;
+          case "FLAGS.ZF": flag = "ZF"; break;
+          case "FLAGS.AF": flag = "AF"; break;
+          case "FLAGS.PF": flag = "PF"; break;
+          case "FLAGS.DF": flag = "DF"; break;
+          case "FLAGS.IF": flag = "IF"; break;
+        //case "FLAGS.TF": flag = "TF"; break;
+          case "FLAGS.AC": flag = "AC"; break;
+          case "X86SW.C0": flag = "C0"; break;
+          case "X86SW.C1": flag = "C1"; break;
+          case "X86SW.C2": flag = "C2"; break;
+          case "X86SW.C3": flag = "C3"; break;
+          default:
+            continue;
+        }
+
+        switch (specialRegs[specialReg]) {
+          case "R":
+            r[flag] = true;
+            break;
+          case "X":
+            r[flag] = true;
+            // ... fallthrough ...
+          case "W":
+          case "U":
+          case "0":
+          case "1":
+            w[flag] = true;
+            break;
+        }
+      }
+    }
+
+    return [ArrayUtils.sorted(r), ArrayUtils.sorted(w)];
   }
 }
 
@@ -1789,171 +1788,568 @@ class InstExecutionTable extends commons.Task {
 // [tablegen.x86.InstRWInfoTable]
 // ============================================================================
 
-class InstRWInfoTable extends commons.Task {
+const NOT_MEM_AMBIGUOUS = MapUtils.arrayToMap([
+  "call", "movq"
+]);
+
+class InstRWInfoTable extends core.Task {
   constructor() {
     super("InstRWInfoTable");
+
+    this.rwInfoIndex = [];
+    this.rwInfoTable = new IndexedArray();
+    this.rmInfoTable = new IndexedArray();
+    this.opInfoTable = new IndexedArray();
+
+    const _ = null;
+    this.rwCategoryByName = {
+      "imul"      : "Imul",
+      "mov"       : "Mov",
+      "movhpd"    : "Movh64",
+      "movhps"    : "Movh64",
+      "vmaskmovpd": "Vmaskmov",
+      "vmaskmovps": "Vmaskmov",
+      "vmovddup"  : "Vmovddup",
+      "vmovmskpd" : "Vmovmskpd",
+      "vmovmskps" : "Vmovmskps",
+      "vpmaskmovd": "Vmaskmov",
+      "vpmaskmovq": "Vmaskmov"
+    };
+    this.rwCategoryByData = {
+      Vmov1_8: [
+        [{access: "W", flags: {}, fixed: -1, index: 0, width:  8}, {access: "R", flags: {}, fixed: -1, index: 0, width: 64},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 16}, {access: "R", flags: {}, fixed: -1, index: 0, width:128},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 32}, {access: "R", flags: {}, fixed: -1, index: 0, width:256},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 64}, {access: "R", flags: {}, fixed: -1, index: 0, width:512},_,_,_,_]
+      ],
+      Vmov1_4: [
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 32}, {access: "R", flags: {}, fixed: -1, index: 0, width:128},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 64}, {access: "R", flags: {}, fixed: -1, index: 0, width:256},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width:128}, {access: "R", flags: {}, fixed: -1, index: 0, width:512},_,_,_,_]
+      ],
+      Vmov1_2: [
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 64}, {access: "R", flags: {}, fixed: -1, index: 0, width:128},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width:128}, {access: "R", flags: {}, fixed: -1, index: 0, width:256},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width:256}, {access: "R", flags: {}, fixed: -1, index: 0, width:512},_,_,_,_]
+      ],
+      Vmov2_1: [
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 128}, {access: "R", flags: {}, fixed: -1, index: 0, width: 64},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 256}, {access: "R", flags: {}, fixed: -1, index: 0, width:128},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 512}, {access: "R", flags: {}, fixed: -1, index: 0, width:256},_,_,_,_]
+      ],
+      Vmov4_1: [
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 128}, {access: "R", flags: {}, fixed: -1, index: 0, width: 32},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 256}, {access: "R", flags: {}, fixed: -1, index: 0, width: 64},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 512}, {access: "R", flags: {}, fixed: -1, index: 0, width:128},_,_,_,_]
+      ],
+      Vmov8_1: [
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 128}, {access: "R", flags: {}, fixed: -1, index: 0, width: 16},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 256}, {access: "R", flags: {}, fixed: -1, index: 0, width: 32},_,_,_,_],
+        [{access: "W", flags: {}, fixed: -1, index: 0, width: 512}, {access: "R", flags: {}, fixed: -1, index: 0, width: 64},_,_,_,_]
+      ]
+    };
   }
 
   run() {
     const insts = this.ctx.insts;
 
-    const iRWInfoMap = Object.create(null);
-    const iRWInfoArr = [];
+    const noRmInfo = CxxUtils.struct(
+      "InstDB::RWInfoRm::kCategory" + "None".padEnd(10),
+      StringUtils.decToHex(0, 2),
+      String(0).padEnd(2),
+      CxxUtils.flags({}),
+      "0"
+    );
 
-    const MAX_OPS = 6;
+    const noOpInfo = CxxUtils.struct(
+      "0x0000000000000000u",
+      "0x0000000000000000u",
+      "0xFF",
+      CxxUtils.struct(0),
+      "0"
+    );
 
-    // Doesn't have to match AsmJit constants as they will be stringified.
-    const kRead            = 0x00000001;
-    const kWrite           = 0x00000002;
-    const kRW              = 0x00000003;
-    const kZExt            = 0x00000010;
-    const kNoZExtGpbGpwXmm = 0x00000020;
+    this.rmInfoTable.addIndexed(noRmInfo);
+    this.opInfoTable.addIndexed(noOpInfo);
 
-    function newOInfo() {
+    insts.forEach((inst) => {
+      // Alternate forms would only mess this up, so filter them out.
+      const dbInsts = Filter.noAltForm(inst.dbInsts);
+
+      // The best we can do is to divide instructions that have 2 operands and others.
+      // This gives us the highest chance of preventing special cases (which were not
+      // entirely avoided).
+      const o2Insts = dbInsts.filter((inst) => { return inst.operands.length === 2; });
+      const oxInsts = dbInsts.filter((inst) => { return inst.operands.length !== 2; });
+
+      const rwInfoArray = [this.rwInfo(o2Insts), this.rwInfo(oxInsts)];
+      const rmInfoArray = [this.rmInfo(o2Insts), this.rmInfo(oxInsts)];
+
+      for (var i = 0; i < 2; i++) {
+        const rwInfo = rwInfoArray[i];
+        const rmInfo = rmInfoArray[i];
+
+        const rwOps = rwInfo.rwOps;
+        const rwOpsIndex = [];
+        for (var j = 0; j < rwOps.length; j++) {
+          const op = rwOps[j];
+          if (!op) {
+            rwOpsIndex.push(this.opInfoTable.addIndexed(noOpInfo));
+            continue;
+          }
+
+          const flags = {};
+          const opAcc = op.access;
+
+          if (opAcc === "R") flags.Read = true;
+          if (opAcc === "W") flags.Write = true;
+          if (opAcc === "X") flags.RW = true;
+          Lang.merge(flags, op.flags);
+
+          const rIndex = opAcc === "X" || opAcc === "R" ? op.index : -1;
+          const rWidth = opAcc === "X" || opAcc === "R" ? op.width : -1;
+          const wIndex = opAcc === "X" || opAcc === "W" ? op.index : -1;
+          const wWidth = opAcc === "X" || opAcc === "W" ? op.width : -1;
+
+          const opData = CxxUtils.struct(
+            this.byteMaskFromBitRanges([{ start: rIndex, end: rIndex + rWidth - 1 }]) + "u",
+            this.byteMaskFromBitRanges([{ start: wIndex, end: wIndex + wWidth - 1 }]) + "u",
+            StringUtils.decToHex(op.fixed === -1 ? 0xFF : op.fixed, 2),
+            CxxUtils.struct(0),
+            CxxUtils.flags(flags, function(flag) { return "OpRWInfo::k" + flag; })
+          );
+
+          rwOpsIndex.push(this.opInfoTable.addIndexed(opData));
+        }
+
+        const rmData = CxxUtils.struct(
+          "InstDB::RWInfoRm::kCategory" + rmInfo.category.padEnd(10),
+          StringUtils.decToHex(rmInfo.rmIndexes, 2),
+          String(Math.max(rmInfo.memFixed, 0)).padEnd(2),
+          CxxUtils.flags({ "InstDB::RWInfoRm::kFlagAmbiguous": Boolean(rmInfo.memAmbiguous) }),
+          rmInfo.memExtension === "None" ? "0" : "Features::k" + rmInfo.memExtension
+        );
+
+        const rwData = CxxUtils.struct(
+          "InstDB::RWInfo::kCategory" + rwInfo.category.padEnd(10),
+          String(this.rmInfoTable.addIndexed(rmData)).padEnd(2),
+          CxxUtils.struct(...(rwOpsIndex.map(function(item) { return String(item).padEnd(2); })))
+        );
+
+        this.rwInfoIndex.push(this.rwInfoTable.addIndexed(rwData));
+      }
+    });
+
+    var s = "";
+    s += "const uint8_t InstDB::rwInfoIndex[Inst::_kIdCount * 2] = {\n" + StringUtils.format(this.rwInfoIndex, kIndent, -1) + "\n};\n";
+    s += "\n";
+    s += "const InstDB::RWInfo InstDB::rwInfo[] = {\n" + StringUtils.format(this.rwInfoTable, kIndent, true) + "\n};\n";
+    s += "\n";
+    s += "const InstDB::RWInfoOp InstDB::rwInfoOp[] = {\n" + StringUtils.format(this.opInfoTable, kIndent, true) + "\n};\n";
+    s += "\n";
+    s += "const InstDB::RWInfoRm InstDB::rwInfoRm[] = {\n" + StringUtils.format(this.rmInfoTable, kIndent, true) + "\n};\n";
+
+    const size = this.rwInfoIndex.length +
+                 this.rwInfoTable.length * 8 +
+                 this.rmInfoTable.length * 4 +
+                 this.opInfoTable.length * 24;
+
+    this.inject("InstRWInfoTable", disclaimer(s), size);
+  }
+
+  byteMaskFromBitRanges(ranges) {
+    const arr = [];
+    for (var i = 0; i < 64; i++)
+      arr.push(0);
+
+    for (var i = 0; i < ranges.length; i++) {
+      const start = ranges[i].start;
+      const end = ranges[i].end;
+
+      if (start < 0)
+        continue;
+
+      for (var j = start; j <= end; j++) {
+        const bytePos = j >> 3;
+        if (bytePos < 0 || bytePos >= arr.length)
+          FAIL(`Range ${start}:${end} cannot be used to create a byte-mask`);
+        arr[bytePos] = 1;
+      }
+    }
+
+    var s = "0x";
+    for (var i = arr.length - 4; i >= 0; i -= 4) {
+      const value = (arr[i + 3] << 3) | (arr[i + 2] << 2) | (arr[i + 1] << 1) | arr[i];
+      s += value.toString(16).toUpperCase();
+    }
+    return s;
+  }
+
+  // Read/Write Info
+  // ---------------
+
+  rwInfo(dbInsts) {
+    function nullOps() {
+      return [null, null, null, null, null, null];
+    }
+
+    function makeRwFromOp(op) {
+      if (!op.isRegOrMem())
+        return null;
+
       return {
-        flags: kRead,
-        physId: 0xFF,
-        index: 0,
-        width: 0
+        access: op.read && op.write ? "X" : op.read ? "R" : op.write ? "W" : "?",
+        flags: {},
+        fixed: GenUtils.fixedRegOf(op.reg),
+        index: op.rwxIndex,
+        width: op.rwxWidth
       };
     }
 
-    function OFlagsToString(flags) {
-      var s = "";
+    function queryRwGeneric(dbInsts, step) {
+      var rwOps = nullOps();
+      for (var i = 0; i < dbInsts.length; i++) {
+        const dbInst = dbInsts[i];
+        const operands = dbInst.operands;
 
-      s += (flags & kRead) && (flags & kWrite) ? "X" : (flags & kWrite) ? "W" : "R";
-      //if (flags & kZExt) s += "|ZExt";
-      if (flags & kNoZExtGpbGpwXmm) s += "|NoZExtGpbGpwXmm";
+        for (var j = 0; j < operands.length; j++) {
+          const op = operands[j];
+          if (!op.isRegOrMem())
+            continue;
 
-      return s ? s : "0";
-    }
+          const opSize = op.isReg() ? op.regSize : op.memSize;
+          var d = {
+            access: op.read && op.write ? "X" : op.read ? "R" : op.write ? "W" : "?",
+            flags: {},
+            fixed: -1,
+            index: -1,
+            width: -1
+          };
 
-    function ORWInfoToString(oRWInfo) {
-      return `{ ${OFlagsToString(oRWInfo.flags)}, ${oRWInfo.physId}, ${oRWInfo.index}, ${oRWInfo.width} }`;
-    }
+          if (op.isReg())
+            d.fixed = GenUtils.fixedRegOf(op.reg);
+          else
+            d.fixed = GenUtils.fixedRegOf(op.mem);
 
-    function IRWInfoToString(iRWInfo) {
-      var s = "";
+          if (op.zext)
+            d.flags.ZExt = true;
 
-      s += "{ ";
-      s += `${iRWInfo.flags}`;
-      s += ", " + ORWInfoToString(iRWInfo.extraReg);
-      s += ", { ";
-      const operands = iRWInfo.operands;
-      for (var i = 0; i < MAX_OPS; i++) {
-        if (i !== 0) s += ", ";
-        s += ORWInfoToString(operands[i]);
+          if ((step === -1 || step === j) || op.rwxIndex !== 0 || op.rwxWidth !== opSize) {
+            d.index = op.rwxIndex;
+            d.width = op.rwxWidth;
+          }
+
+          if (d.fixed !== -1) {
+            if (op.memSeg)
+              d.flags.MemPhysId = true;
+            else
+              d.flags.RegPhysId = true;
+          }
+
+          if (rwOps[j] === null) {
+            rwOps[j] = d;
+          }
+          else {
+            if (!Lang.deepEqExcept(rwOps[j], d, { "fixed": true, "flags": true }))
+              return null;
+
+            if (rwOps[j].fixed === -1)
+              rwOps[j].fixed = d.fixed;
+            Lang.merge(rwOps[j].flags, d.flags);
+          }
+        }
       }
-      s += "} ";
-      s += "}";
-
-      return s;
+      return { category: "Generic", rwOps };
     }
 
-    function canMergeORWInfo(a, b) {
-      if (a.physId !== b.physId || a.index !== b.index || a.width !== b.width)
-        return false;
+    function queryRwByData(dbInsts, rwOpsArray) {
+      for (var i = 0; i < dbInsts.length; i++) {
+        const dbInst = dbInsts[i];
+        const operands = dbInst.operands;
+        const rwOps = nullOps();
 
-      if (a.flags === b.flags)
-        return true;
+        for (var j = 0; j < operands.length; j++)
+          rwOps[j] = makeRwFromOp(operands[j])
 
-      function mergeable(af, bf) {
-        if ((af | kNoZExtGpbGpwXmm) === bf)
-          return true;
-        else
+        var match = 0;
+        for (var j = 0; j < rwOpsArray.length; j++)
+          match |= Lang.deepEq(rwOps, rwOpsArray[j]);
+
+        if (!match)
           return false;
       }
-
-      return mergeable(a.flags, b.flags) || mergeable(b.flags, a.flags);
-    }
-
-    function canMergeIRWInfo(a, b) {
-      if (a.flags !== b.flags || !canMergeORWInfo(a.extraReg, b.extraReg))
-        return false;
-
-      for (var i = 0; i < MAX_OPS; i++)
-        if (!canMergeORWInfo(a.operands[i], b.operands[i]))
-          return false;
 
       return true;
     }
 
-    function mergeItem(arr, item) {
-      function mergeORWInfo(a, b) {
-        a.flags |= b.flags;
+    function dumpRwToData(dbInsts) {
+      const out = [];
+      for (var i = 0; i < dbInsts.length; i++) {
+        const dbInst = dbInsts[i];
+        const operands = dbInst.operands;
+        const rwOps = nullOps();
+
+        for (var j = 0; j < operands.length; j++)
+          rwOps[j] = makeRwFromOp(operands[j])
+
+        if (ArrayUtils.deepIndexOf(out, rwOps) !== -1)
+          continue;
+
+        out.push(rwOps);
       }
-
-      for (var i = 0; i < arr.length; i++) {
-        if (canMergeIRWInfo(arr[i], item)) {
-          const a = arr[i];
-          const b = item;
-
-          mergeORWInfo(a.extraReg, b.extraReg);
-          for (var j = 0; j < MAX_OPS; j++)
-            mergeORWInfo(a.operands[j], b.operands[j]);
-
-          return true;
-        }
-      }
-      return false;
+      return out;
     }
 
-    insts.forEach((inst) => {
-      const dbInsts = inst.dbInsts;
-      if (dbInsts.length) {
-        const rwArr = [];
-        dbInsts.forEach((inst) => {
-          var rwInfo = {
-            flags: 0,
-            extraReg: newOInfo(),
-            operands: [newOInfo(), newOInfo(), newOInfo(), newOInfo(), newOInfo(), newOInfo()]
-          };
+    // Some instructions are just special...
+    const name = dbInsts.length ? dbInsts[0].name : "";
+    if (name in this.rwCategoryByName)
+      return { category: this.rwCategoryByName[name], rwOps: nullOps() };
 
-          inst.operands.forEach((op, opIndex) => {
-            if (op.isRegOrMem()) {
-              const oRWInfo = rwInfo.operands[opIndex];
-              if (op.read && op.write) {
-                oRWInfo.flags |= kRW;
-              }
-              else if (op.write) {
-                oRWInfo.flags &=~kRead;
-                oRWInfo.flags |= kWrite;
-              }
-              else {
-              }
+    // Generic rules.
+    for (var i = -1; i <= 6; i++) {
+      const rwInfo = queryRwGeneric(dbInsts, i);
+      if (rwInfo)
+        return rwInfo;
+    }
 
-              //if (op.zext) {
-              //  oRWInfo.flags |= kZExt;
-              // }
-              if (op.write && op.isPartialOp()) {
-                oRWInfo.flags |= kNoZExtGpbGpwXmm;
-              }
+    // Specific rules.
+    for (var k in this.rwCategoryByData)
+      if (queryRwByData(dbInsts, this.rwCategoryByData[k]))
+        return { category: k, rwOps: nullOps() };
 
-              const rwxIndex = Math.max(op.rwxIndex, 0);
-              const rwxWidth = Math.max(op.rwxWidth, 0);
+    // FAILURE: Missing data to categorize this instruction.
+    if (name) {
+      const items = dumpRwToData(dbInsts)
+      console.log(`RW: ${dbInsts.length ? dbInsts[0].name : ""}:`);
+      items.forEach((item) => {
+        console.log("  " + JSON.stringify(item));
+      });
+    }
 
-              oRWInfo.index = rwxIndex;
-              oRWInfo.width = rwxWidth;
-            }
-          });
+    return null;
+  }
 
-          if (!mergeItem(rwArr, rwInfo))
-            rwArr.push(rwInfo);
-        });
+  // Reg/Mem Info
+  // ------------
 
-        if (rwArr.length > 1) {
-          console.log(inst.name + ": ");
-          rwArr.forEach(function(item) { console.log("  " + IRWInfoToString(item)); });
+  rmInfo(dbInsts) {
+    const info = {
+      category: "None",
+      rmIndexes: this.rmReplaceableIndexes(dbInsts),
+      memFixed: this.rmFixedSize(dbInsts),
+      memAmbiguous: this.rmIsAmbiguous(dbInsts),
+      memConsistent: this.rmIsConsistent(dbInsts),
+      memExtension: this.rmExtension(dbInsts)
+    };
+
+    if (info.memFixed !== -1)
+      info.category = "Fixed";
+    else if (info.memConsistent)
+      info.category = "Consistent";
+    else if (info.rmIndexes)
+      info.category = this.rmReplaceableCategory(dbInsts);
+
+    return info;
+  }
+
+  rmReplaceableCategory(dbInsts) {
+    var category = null;
+
+    for (var i = 0; i < dbInsts.length; i++) {
+      const dbInst = dbInsts[i];
+      const operands = dbInst.operands;
+
+      var rs = -1;
+      var ms = -1;
+
+      for (var j = 0; j < operands.length; j++) {
+        const op = operands[j];
+        if (op.isMem())
+          ms = op.memSize;
+        else if (op.isReg())
+          rs = Math.max(rs, op.regSize);
+      }
+
+      var c = (rs === -1    ) ? "None"    :
+              (ms === -1    ) ? "None"    :
+              (ms === rs    ) ? "Fixed"   :
+              (ms === rs / 2) ? "Half"    :
+              (ms === rs / 4) ? "Quarter" :
+              (ms === rs / 8) ? "Eighth"  : "Unknown";
+
+      if (category === null)
+        category = c;
+      else if (category !== c) {
+        if (dbInst.name === "mov" || dbInst.name === "vmovddup")
+          return "None"; // Special case
+        return StringUtils.capitalize(dbInst.name); // Special case.
+      }
+    }
+
+    if (category === "Unknown")
+      console.log(`Instruction '${dbInsts[0].name}' has no RMInfo category.`);
+
+    return category || "Unknown";
+  }
+
+  rmReplaceableIndexes(dbInsts) {
+    function maskOf(inst, fn) {
+      var m = 0;
+      var operands = inst.operands;
+      for (var i = 0; i < operands.length; i++)
+        if (fn(operands[i]))
+          m |= (1 << i);
+      return m;
+    }
+
+    function getRegIndexes(inst) { return maskOf(inst, function(op) { return op.isReg(); }); };
+    function getMemIndexes(inst) { return maskOf(inst, function(op) { return op.isMem(); }); };
+
+    var mask = 0;
+
+    for (var i = 0; i < dbInsts.length; i++) {
+      const dbInst = dbInsts[i];
+
+      var mi = getMemIndexes(dbInst);
+      var ri = getRegIndexes(dbInst) & ~mi;
+
+      if (!mi)
+        continue;
+
+      const match = dbInsts.some((inst) => {
+        var ti = getRegIndexes(inst);
+        return ((ri & ti) === ri && (mi & ti) === mi);
+      });
+
+      if (!match)
+        return 0;
+      mask |= mi;
+    }
+
+    return mask;
+  }
+
+  rmFixedSize(insts) {
+    var savedOp = null;
+
+    for (var i = 0; i < insts.length; i++) {
+      const inst = insts[i];
+      const operands = inst.operands;
+
+      for (var j = 0; j < operands.length; j++) {
+        const op = operands[j];
+        if (op.mem) {
+          if (savedOp && savedOp.mem !== op.mem)
+            return -1;
+          savedOp = op;
+        }
+      }
+    }
+
+    return savedOp ? Math.max(savedOp.memSize, 0) / 8 : -1;
+  }
+
+  rmIsConsistent(insts) {
+    var hasMem = 0;
+    for (var i = 0; i < insts.length; i++) {
+      const inst = insts[i];
+      const operands = inst.operands;
+      for (var j = 0; j < operands.length; j++) {
+        const op = operands[j];
+        if (op.mem) {
+          hasMem = 1;
+          if (!op.reg)
+            return 0;
+          if (asmdb.x86.Utils.regSize(op.reg) !== op.memSize)
+            return 0;
+        }
+      }
+    }
+    return hasMem;
+  }
+
+  rmIsAmbiguous(dbInsts) {
+    function isAmbiguous(dbInsts) {
+      const memMap = {};
+      const immMap = {};
+
+      for (var i = 0; i < dbInsts.length; i++) {
+        const dbInst = dbInsts[i];
+        const operands = dbInst.operands;
+
+        var memStr = "";
+        var immStr = "";
+        var hasMem = false;
+        var hasImm = false;
+
+        for (var j = 0; j < operands.length; j++) {
+          const op = operands[j];
+          if (j) {
+            memStr += ", ";
+            immStr += ", ";
+          }
+
+          if (op.isImm()) {
+            immStr += "imm";
+            hasImm = true;
+          }
+          else {
+            immStr += op.toString();
+          }
+
+          if (op.mem) {
+            memStr += "m";
+            hasMem = true;
+          }
+          else {
+            memStr += op.isImm() ? "imm" : op.toString();
+          }
         }
 
-        //iRWInfoArr[index].refs++;
-        //inst.rwInfoIndex = index;
-        //inst.rwInfoCount = count;
-      }
-    });
+        if (hasImm) {
+          if (immMap[immStr] === true)
+            continue;
+          immMap[immStr] = true;
+        }
 
-    //var s = StringUtils.makeCxxArrayWithComment(iSignatureArr, "const Inst::IRWInfo X86InstDB::iRWInfoData[]");
-    //this.inject("rwInfoData", disclaimer(s), 0);
+        if (hasMem) {
+          if (memMap[memStr] === true)
+            return 1;
+          memMap[memStr] = true;
+        }
+      }
+      return 0;
+    }
+
+    const uniqueInsts = Filter.unique(dbInsts);
+
+    // Special cases.
+    if (!dbInsts.length)
+      return 0;
+
+    if (NOT_MEM_AMBIGUOUS[dbInsts[0].name])
+      return 0;
+
+    return (isAmbiguous(Filter.byArch(uniqueInsts, "X86")) << 0) |
+           (isAmbiguous(Filter.byArch(uniqueInsts, "X64")) << 1) ;
+  }
+
+  rmExtension(dbInsts) {
+    if (!dbInsts.length)
+      return "None";
+
+    const name = dbInsts[0].name;
+    switch (name) {
+      case "pextrw":
+        return "SSE4_1";
+
+      case "vpslldq":
+      case "vpsrldq":
+        return "AVX512_BW";
+
+      default:
+        return "None";
+    }
   }
 }
 
@@ -1961,13 +2357,13 @@ class InstRWInfoTable extends commons.Task {
 // [tablegen.x86.InstCommonTable]
 // ============================================================================
 
-class InstCommonTable extends commons.Task {
+class InstCommonTable extends core.Task {
   constructor() {
     super("InstCommonTable", [
       "IdEnum",
       "NameTable",
       "InstSignatureTable",
-      "InstExecutionTable",
+      "InstCommonInfoTableB",
       "InstRWInfoTable"
     ]);
   }
@@ -1980,30 +2376,24 @@ class InstCommonTable extends commons.Task {
       const flags         = inst.flags.map(function(flag) { return `F(${flag})`; }).join("|") || "0";
       const singleRegCase = `SINGLE_REG(${inst.singleRegCase})`;
       const controlType   = `CONTROL(${inst.controlType})`;
-      const specialCases  = inst.specialCases.map(function(flag) { return `SPECIAL_CASE(${flag})`; }).join("|") || "0";
 
       const row = "{ " +
-        padLeft(flags              , 54) + ", " +
-        padLeft(inst.writeIndex    ,  3) + ", " +
-        padLeft(inst.writeSize     ,  3) + ", " +
-        padLeft(inst.signatureIndex,  3) + ", " +
-        padLeft(inst.signatureCount,  2) + ", " +
-        padLeft(controlType        , 16) + ", " +
-        padLeft(singleRegCase      , 16) + ", " +
-        padLeft(specialCases       , 20) + ", " + "0 }";
-      inst.commonDataIndex = table.addIndexed(row);
+        String(flags              ).padEnd(54) + ", " +
+        String(inst.signatureIndex).padEnd( 3) + ", " +
+        String(inst.signatureCount).padEnd( 2) + ", " +
+        String(controlType        ).padEnd(16) + ", " +
+        String(singleRegCase      ).padEnd(16) + ", " + "0 }";
+      inst.commonInfoIndexA = table.addIndexed(row);
     });
 
     var s = `#define F(VAL) InstDB::kFlag##VAL\n` +
             `#define CONTROL(VAL) Inst::kControl##VAL\n` +
             `#define SINGLE_REG(VAL) InstDB::kSingleReg##VAL\n` +
-            `#define SPECIAL_CASE(VAL) InstDB::kSpecialCase##VAL\n` +
             `const InstDB::CommonInfo InstDB::_commonInfoTable[] = {\n${StringUtils.format(table, kIndent, true)}\n};\n` +
-            `#undef SPECIAL_CASE\n` +
             `#undef SINGLE_REG\n` +
             `#undef CONTROL\n` +
             `#undef F\n`;
-    this.inject("InstCommonTable", disclaimer(s), table.length * 12);
+    this.inject("InstCommonTable", disclaimer(s), table.length * 8);
   }
 }
 
@@ -2014,12 +2404,9 @@ class InstCommonTable extends commons.Task {
 new X86TableGen()
   .addTask(new IdEnum())
   .addTask(new NameTable())
-  .addTask(new EncodingTable())
-  .addTask(new MainOpcodeTable())
   .addTask(new AltOpcodeTable())
-  .addTask(new InstSseToAvxTable())
   .addTask(new InstSignatureTable())
-  .addTask(new InstExecutionTable())
+  .addTask(new InstCommonInfoTableB())
   .addTask(new InstRWInfoTable())
   .addTask(new InstCommonTable())
   .run();

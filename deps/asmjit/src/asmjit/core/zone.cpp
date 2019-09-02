@@ -1,14 +1,12 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
-#include "../core/memmgr.h"
+#include "../core/support.h"
 #include "../core/zone.h"
 
 ASMJIT_BEGIN_NAMESPACE
@@ -30,10 +28,14 @@ void Zone::_init(size_t blockSize, size_t blockAlignment, const Support::Tempora
   ASMJIT_ASSERT(blockSize <= kMaxBlockSize);
   ASMJIT_ASSERT(blockAlignment <= 64);
 
+  // Just to make the compiler happy...
+  constexpr size_t kBlockSizeMask = (Support::allOnes<size_t>() >> 4);
+  constexpr size_t kBlockAlignmentShiftMask = 0x7u;
+
   _assignZeroBlock();
-  _blockSize = blockSize & Support::lsbMask<size_t>(Support::bitSizeOf<size_t>() - 4);
+  _blockSize = blockSize & kBlockSizeMask;
   _isTemporary = temporary != nullptr;
-  _blockAlignmentShift = Support::ctz(blockAlignment) & 0x7;
+  _blockAlignmentShift = Support::ctz(blockAlignment) & kBlockAlignmentShiftMask;
 
   // Setup the first [temporary] block, if necessary.
   if (temporary) {
@@ -77,14 +79,14 @@ void Zone::reset(uint32_t resetPolicy) noexcept {
         break;
       }
 
-      MemMgr::release(cur);
+      ::free(cur);
       cur = prev;
     } while (cur);
 
     cur = next;
     while (cur) {
       next = cur->next;
-      MemMgr::release(cur);
+      ::free(cur);
       cur = next;
     }
   }
@@ -104,7 +106,7 @@ void* Zone::_alloc(size_t size, size_t alignment) noexcept {
   Block* next = curBlock->next;
 
   size_t rawBlockAlignment = blockAlignment();
-  size_t minimumAlignment = std::max<size_t>(alignment, rawBlockAlignment);
+  size_t minimumAlignment = Support::max<size_t>(alignment, rawBlockAlignment);
 
   // If the `Zone` has been cleared the current block doesn't have to be the
   // last one. Check if there is a block that can be used instead of allocating
@@ -122,8 +124,8 @@ void* Zone::_alloc(size_t size, size_t alignment) noexcept {
     }
   }
 
-  size_t blockAlignmentOverhead = alignment - std::min<size_t>(alignment, Globals::kMemAllocAlignment);
-  size_t newSize = std::max(blockSize(), size);
+  size_t blockAlignmentOverhead = alignment - Support::min<size_t>(alignment, Globals::kAllocAlignment);
+  size_t newSize = Support::max(blockSize(), size);
 
   // Prevent arithmetic overflow.
   if (ASMJIT_UNLIKELY(newSize > std::numeric_limits<size_t>::max() - kBlockSize - blockAlignmentOverhead))
@@ -133,7 +135,7 @@ void* Zone::_alloc(size_t size, size_t alignment) noexcept {
   // new block size, and we also add `kBlockOverhead` to the allocator as it includes
   // members of `Zone::Block` structure.
   newSize += blockAlignmentOverhead;
-  Block* newBlock = static_cast<Block*>(MemMgr::alloc(newSize + kBlockSize));
+  Block* newBlock = static_cast<Block*>(::malloc(newSize + kBlockSize));
 
   if (ASMJIT_UNLIKELY(!newBlock))
     return nullptr;
@@ -175,7 +177,7 @@ void* Zone::allocZeroed(size_t size, size_t alignment) noexcept {
   void* p = alloc(size, alignment);
   if (ASMJIT_UNLIKELY(!p))
     return p;
-  return std::memset(p, 0, size);
+  return memset(p, 0, size);
 }
 
 void* Zone::dup(const void* data, size_t size, bool nullTerminate) noexcept {
@@ -186,7 +188,7 @@ void* Zone::dup(const void* data, size_t size, bool nullTerminate) noexcept {
   uint8_t* m = allocT<uint8_t>(size + nullTerminate);
   if (ASMJIT_UNLIKELY(!m)) return nullptr;
 
-  std::memcpy(m, data, size);
+  memcpy(m, data, size);
   if (nullTerminate) m[size] = '\0';
 
   return static_cast<void*>(m);
@@ -198,10 +200,10 @@ char* Zone::sformat(const char* fmt, ...) noexcept {
 
   char buf[512];
   size_t size;
-  std::va_list ap;
+  va_list ap;
 
   va_start(ap, fmt);
-  size = std::vsnprintf(buf, ASMJIT_ARRAY_SIZE(buf) - 1, fmt, ap);
+  size = unsigned(vsnprintf(buf, ASMJIT_ARRAY_SIZE(buf) - 1, fmt, ap));
   va_end(ap);
 
   buf[size++] = 0;
@@ -212,6 +214,7 @@ char* Zone::sformat(const char* fmt, ...) noexcept {
 // [asmjit::ZoneAllocator - Helpers]
 // ============================================================================
 
+#if defined(ASMJIT_BUILD_DEBUG)
 static bool ZoneAllocator_hasDynamicBlock(ZoneAllocator* self, ZoneAllocator::DynamicBlock* block) noexcept {
   ZoneAllocator::DynamicBlock* cur = self->_dynamicBlocks;
   while (cur) {
@@ -221,6 +224,7 @@ static bool ZoneAllocator_hasDynamicBlock(ZoneAllocator* self, ZoneAllocator::Dy
   }
   return false;
 }
+#endif
 
 // ============================================================================
 // [asmjit::ZoneAllocator - Init / Reset]
@@ -231,12 +235,12 @@ void ZoneAllocator::reset(Zone* zone) noexcept {
   DynamicBlock* block = _dynamicBlocks;
   while (block) {
     DynamicBlock* next = block->next;
-    MemMgr::release(block);
+    ::free(block);
     block = next;
   }
 
   // Zero the entire class and initialize to the given `zone`.
-  std::memset(this, 0, sizeof(*this));
+  memset(this, 0, sizeof(*this));
   _zone = zone;
 }
 
@@ -271,7 +275,7 @@ void* ZoneAllocator::_alloc(size_t size, size_t& allocatedSize) noexcept {
       // Distribute the remaining memory to suitable slots, if possible.
       if (remain >= kLoGranularity) {
         do {
-          size_t distSize = std::min<size_t>(remain, kLoMaxSize);
+          size_t distSize = Support::min<size_t>(remain, kLoMaxSize);
           uint32_t distSlot = uint32_t((distSize - kLoGranularity) / kLoGranularity);
           ASMJIT_ASSERT(distSlot < kLoCount);
 
@@ -301,7 +305,7 @@ void* ZoneAllocator::_alloc(size_t size, size_t& allocatedSize) noexcept {
     if (ASMJIT_UNLIKELY(kBlockOverhead >= std::numeric_limits<size_t>::max() - size))
       return nullptr;
 
-    void* p = MemMgr::alloc(size + kBlockOverhead);
+    void* p = ::malloc(size + kBlockOverhead);
     if (ASMJIT_UNLIKELY(!p)) {
       allocatedSize = 0;
       return nullptr;
@@ -333,7 +337,7 @@ void* ZoneAllocator::_allocZeroed(size_t size, size_t& allocatedSize) noexcept {
 
   void* p = _alloc(size, allocatedSize);
   if (ASMJIT_UNLIKELY(!p)) return p;
-  return std::memset(p, 0, allocatedSize);
+  return memset(p, 0, allocatedSize);
 }
 
 void ZoneAllocator::_releaseDynamic(void* p, size_t size) noexcept {
@@ -356,7 +360,7 @@ void ZoneAllocator::_releaseDynamic(void* p, size_t size) noexcept {
   if (next)
     next->prev = prev;
 
-  MemMgr::release(block);
+  ::free(block);
 }
 
 ASMJIT_END_NAMESPACE

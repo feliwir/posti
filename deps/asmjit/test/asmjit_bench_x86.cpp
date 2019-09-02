@@ -1,12 +1,11 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Dependencies]
-#include <cstdio>
-#include <cstring>
+#include <stdio.h>
+#include <string.h>
 
 #include "./asmjit.h"
 #include "./asmjit_test_misc.h"
@@ -18,7 +17,7 @@ using namespace asmjit;
 // [Configuration]
 // ============================================================================
 
-static constexpr uint32_t kNumRepeats = 20;
+static constexpr uint32_t kNumRepeats = 25;
 static constexpr uint32_t kNumIterations = 1000;
 
 // ============================================================================
@@ -94,12 +93,12 @@ namespace BenchUtils {
       perf.end();
     }
 
-    std::printf("[%s] %-9s %-8s | Time:%6u [ms] | ", archName, emitterName, testName, perf.best);
+    printf("[%s] %-9s %-8s | Time:%6u [ms] | ", archName, emitterName, testName, perf.best);
     if (codeSize)
-      std::printf("Speed: %7.3f [MB/s]", mbps(perf.best, codeSize));
+      printf("Speed: %7.3f [MB/s]", mbps(perf.best, codeSize));
     else
-      std::printf("Speed: N/A");
-    std::printf("\n");
+      printf("Speed: N/A");
+    printf("\n");
   }
 }
 
@@ -136,6 +135,9 @@ static void benchX86(uint32_t archId) noexcept {
 #endif
 
 int main(int argc, char* argv[]) {
+  ASMJIT_UNUSED(argc);
+  ASMJIT_UNUSED(argv);
+
   #ifdef ASMJIT_BUILD_X86
   benchX86(ArchInfo::kIdX86);
   benchX86(ArchInfo::kIdX64);

@@ -1,13 +1,11 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
 #include "../core/support.h"
 #include "../core/zone.h"
 #include "../core/zonehash.h"
@@ -117,7 +115,7 @@ ZoneHashNode* ZoneHashBase::_remove(ZoneAllocator* allocator, ZoneHashNode* node
 // [asmjit::ZoneHash - Unit]
 // ============================================================================
 
-#if defined(ASMJIT_BUILD_TEST)
+#if defined(ASMJIT_TEST)
 struct MyHashNode : public ZoneHashNode {
   inline MyHashNode(uint32_t key) noexcept
     : ZoneHashNode(key),
@@ -136,8 +134,8 @@ struct MyKeyMatcher {
   uint32_t _key;
 };
 
-UNIT(asmjit_core_zone_hash) {
-  constexpr uint32_t kCount = 10000;
+UNIT(asmjit_zone_hash) {
+  uint32_t kCount = BrokenAPI::hasArg("--quick") ? 1000 : 10000;
 
   Zone zone(4096);
   ZoneAllocator allocator(&zone);

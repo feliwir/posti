@@ -1,15 +1,13 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
 #include "../core/globals.h"
-#include "../core/stringutils.h"
+#include "../core/support.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
@@ -18,43 +16,47 @@ ASMJIT_BEGIN_NAMESPACE
 // ============================================================================
 
 ASMJIT_FAVOR_SIZE const char* DebugUtils::errorAsString(Error err) noexcept {
-  #ifndef ASMJIT_DISABLE_TEXT
-
+#ifndef ASMJIT_NO_TEXT
   static const char errorMessages[] =
     "Ok\0"
-    "No heap memory\0"
-    "No virtual memory\0"
+    "Out of memory\0"
     "Invalid argument\0"
     "Invalid state\0"
     "Invalid architecture\0"
     "Not initialized\0"
     "Already initialized\0"
     "Feature not enabled\0"
+    "Too many handles or file descriptors\0"
+    "Too large (code or memory request)\0"
     "No code generated\0"
-    "Code too large\0"
     "Invalid directive\0"
     "Invalid label\0"
-    "Label index overflow\0"
+    "Too many labels\0"
     "Label already bound\0"
     "Label already defined\0"
     "Label name too long\0"
     "Invalid label name\0"
     "Invalid parent label\0"
     "Non-local label can't have parent\0"
-    "Relocation index overflow\0"
+    "Invalid section\0"
+    "Too many sections\0"
+    "Invalid section name\0"
+    "Too many relocations\0"
     "Invalid relocation entry\0"
+    "Relocation offset out of range\0"
+    "Invalid assignment\0"
     "Invalid instruction\0"
     "Invalid register type\0"
     "Invalid register group\0"
-    "Invalid register's physical id\0"
-    "Invalid register's virtual id\0"
+    "Invalid register physical id\0"
+    "Invalid register virtual id\0"
     "Invalid prefix combination\0"
     "Invalid lock prefix\0"
     "Invalid xacquire prefix\0"
     "Invalid xrelease prefix\0"
     "Invalid rep prefix\0"
     "Invalid rex prefix\0"
-    "Invalid mask, expected {k}\0"
+    "Invalid {...} register \0"
     "Invalid use of {k}\0"
     "Invalid use of {k}{z}\0"
     "Invalid broadcast {1tox}\0"
@@ -62,7 +64,8 @@ ASMJIT_FAVOR_SIZE const char* DebugUtils::errorAsString(Error err) noexcept {
     "Invalid address\0"
     "Invalid address index\0"
     "Invalid address scale\0"
-    "Invalid use of 64-bit address\0"
+    "Invalid use of 64-bit address or offset\0"
+    "Invalid use of 64-bit address or offset that requires 32-bit zero-extension\0"
     "Invalid displacement\0"
     "Invalid segment\0"
     "Invalid immediate value\0"
@@ -79,35 +82,34 @@ ASMJIT_FAVOR_SIZE const char* DebugUtils::errorAsString(Error err) noexcept {
     "No more physical registers\0"
     "Overlapped registers\0"
     "Overlapping register and arguments base-address register\0"
+    "Unbound label cannot be evaluated by expression\0"
+    "Arithmetic overflow during expression evaluation\0"
     "Unknown error\0";
-  return StringUtils::findPackedString(errorMessages, std::min<Error>(err, kErrorCount));
-
-  #else
-
+  return Support::findPackedString(errorMessages, Support::min<Error>(err, kErrorCount));
+#else
   ASMJIT_UNUSED(err);
   static const char noMessage[] = "";
   return noMessage;
-
-  #endif
+#endif
 }
 
 ASMJIT_FAVOR_SIZE void DebugUtils::debugOutput(const char* str) noexcept {
-  #if ASMJIT_OS_WINDOWS
+#if defined(_WIN32)
   ::OutputDebugStringA(str);
-  #else
-  std::fputs(str, stderr);
-  #endif
+#else
+  ::fputs(str, stderr);
+#endif
 }
 
 ASMJIT_FAVOR_SIZE void DebugUtils::assertionFailed(const char* file, int line, const char* msg) noexcept {
   char str[1024];
 
-  std::snprintf(str, 1024,
+  snprintf(str, 1024,
     "[asmjit] Assertion failed at %s (line %d):\n"
     "[asmjit] %s\n", file, line, msg);
 
   debugOutput(str);
-  std::abort();
+  ::abort();
 }
 
 ASMJIT_END_NAMESPACE

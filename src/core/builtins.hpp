@@ -16,6 +16,13 @@ class Builtins
   public:
 
     std::map<std::string, std::shared_ptr<Object>>& CreateDictionary(Interpreter *interpr);
+
+	template<class T>
+	static inline T abs(const T& v)
+	{
+		return v < 0 ? -v : v;
+	}
+
   private:
     void CreateOperand(std::string_view name,std::function<void()> func);
     std::stack<std::shared_ptr<Object>> & GetStack();

@@ -1,13 +1,11 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
 #include "../core/support.h"
 
 ASMJIT_BEGIN_NAMESPACE
@@ -16,7 +14,7 @@ ASMJIT_BEGIN_NAMESPACE
 // [asmjit::Support - Unit]
 // ============================================================================
 
-#if defined(ASMJIT_BUILD_TEST)
+#if defined(ASMJIT_TEST)
 template<typename T>
 static void testArrays(const T* a, const T* b, size_t size) noexcept {
   for (size_t i = 0; i < size; i++)
@@ -57,12 +55,12 @@ static void testBitUtils() noexcept {
   uint32_t i;
 
   INFO("Support::shl() / shr()");
-  EXPECT(Support::shl<int32_t>(0x00001111, 16) == int32_t(0x11110000u));
-  EXPECT(Support::shl<uint32_t>(0x00001111, 16) == uint32_t(0x11110000u));
-  EXPECT(Support::shr<int32_t>(0x11110000u, 16) == int32_t(0x00001111u));
-  EXPECT(Support::shr<uint32_t>(0x11110000u, 16) == uint32_t(0x00001111u));
-  EXPECT(Support::sar<int32_t>(0xFFFF0000u, 16) == int32_t(0xFFFFFFFFu));
-  EXPECT(Support::sar<uint32_t>(0xFFFF0000u, 16) == uint32_t(0xFFFFFFFFu));
+  EXPECT(Support::shl(int32_t(0x00001111), 16) == int32_t(0x11110000u));
+  EXPECT(Support::shl(uint32_t(0x00001111), 16) == uint32_t(0x11110000u));
+  EXPECT(Support::shr(int32_t(0x11110000u), 16) == int32_t(0x00001111u));
+  EXPECT(Support::shr(uint32_t(0x11110000u), 16) == uint32_t(0x00001111u));
+  EXPECT(Support::sar(int32_t(0xFFFF0000u), 16) == int32_t(0xFFFFFFFFu));
+  EXPECT(Support::sar(uint32_t(0xFFFF0000u), 16) == uint32_t(0xFFFFFFFFu));
 
   INFO("Support::blsi()");
   for (i = 0; i < 32; i++) EXPECT(Support::blsi(uint32_t(1) << i) == uint32_t(1) << i);
@@ -73,13 +71,13 @@ static void testBitUtils() noexcept {
   INFO("Support::ctz()");
   for (i = 0; i < 32; i++) EXPECT(Support::ctz(uint32_t(1) << i) == i);
   for (i = 0; i < 64; i++) EXPECT(Support::ctz(uint64_t(1) << i) == i);
-  for (i = 0; i < 32; i++) EXPECT(Support::Internal::ctzGeneric(uint32_t(1) << i) == i);
-  for (i = 0; i < 64; i++) EXPECT(Support::Internal::ctzGeneric(uint64_t(1) << i) == i);
+  for (i = 0; i < 32; i++) EXPECT(Support::constCtz(uint32_t(1) << i) == i);
+  for (i = 0; i < 64; i++) EXPECT(Support::constCtz(uint64_t(1) << i) == i);
 
-  INFO("Support::mask()");
-  EXPECT(Support::mask(0, 1, 7) == 0x83u);
+  INFO("Support::bitMask()");
+  EXPECT(Support::bitMask(0, 1, 7) == 0x83u);
   for (i = 0; i < 32; i++)
-    EXPECT(Support::mask(i) == (1u << i));
+    EXPECT(Support::bitMask(i) == (1u << i));
 
   INFO("Support::bitTest()");
   for (i = 0; i < 32; i++) {
@@ -128,33 +126,37 @@ static void testIntUtils() noexcept {
   EXPECT(bpdata.bytes[3] == 0x33);
 
   INFO("Support::isBetween()");
+  EXPECT(Support::isBetween<int>(10 , 10, 20) == true);
   EXPECT(Support::isBetween<int>(11 , 10, 20) == true);
+  EXPECT(Support::isBetween<int>(20 , 10, 20) == true);
+  EXPECT(Support::isBetween<int>(9  , 10, 20) == false);
+  EXPECT(Support::isBetween<int>(21 , 10, 20) == false);
   EXPECT(Support::isBetween<int>(101, 10, 20) == false);
 
-  INFO("Support::isI8()");
-  EXPECT(Support::isI8(-128) == true);
-  EXPECT(Support::isI8( 127) == true);
-  EXPECT(Support::isI8(-129) == false);
-  EXPECT(Support::isI8( 128) == false);
+  INFO("Support::isInt8()");
+  EXPECT(Support::isInt8(-128) == true);
+  EXPECT(Support::isInt8( 127) == true);
+  EXPECT(Support::isInt8(-129) == false);
+  EXPECT(Support::isInt8( 128) == false);
 
-  INFO("Support::isI16()");
-  EXPECT(Support::isI16(-32768) == true);
-  EXPECT(Support::isI16( 32767) == true);
-  EXPECT(Support::isI16(-32769) == false);
-  EXPECT(Support::isI16( 32768) == false);
+  INFO("Support::isInt16()");
+  EXPECT(Support::isInt16(-32768) == true);
+  EXPECT(Support::isInt16( 32767) == true);
+  EXPECT(Support::isInt16(-32769) == false);
+  EXPECT(Support::isInt16( 32768) == false);
 
-  INFO("Support::isI32()");
-  EXPECT(Support::isI32( 2147483647    ) == true);
-  EXPECT(Support::isI32(-2147483647 - 1) == true);
-  EXPECT(Support::isI32(uint64_t(2147483648u)) == false);
-  EXPECT(Support::isI32(uint64_t(0xFFFFFFFFu)) == false);
-  EXPECT(Support::isI32(uint64_t(0xFFFFFFFFu) + 1) == false);
+  INFO("Support::isInt32()");
+  EXPECT(Support::isInt32( 2147483647    ) == true);
+  EXPECT(Support::isInt32(-2147483647 - 1) == true);
+  EXPECT(Support::isInt32(uint64_t(2147483648u)) == false);
+  EXPECT(Support::isInt32(uint64_t(0xFFFFFFFFu)) == false);
+  EXPECT(Support::isInt32(uint64_t(0xFFFFFFFFu) + 1) == false);
 
-  INFO("Support::isU8()");
-  EXPECT(Support::isU8(0)   == true);
-  EXPECT(Support::isU8(255) == true);
-  EXPECT(Support::isU8(256) == false);
-  EXPECT(Support::isU8(-1)  == false);
+  INFO("Support::isUInt8()");
+  EXPECT(Support::isUInt8(0)   == true);
+  EXPECT(Support::isUInt8(255) == true);
+  EXPECT(Support::isUInt8(256) == false);
+  EXPECT(Support::isUInt8(-1)  == false);
 
   INFO("Support::isUInt12()");
   EXPECT(Support::isUInt12(0)    == true);
@@ -162,16 +164,16 @@ static void testIntUtils() noexcept {
   EXPECT(Support::isUInt12(4096) == false);
   EXPECT(Support::isUInt12(-1)   == false);
 
-  INFO("Support::isU16()");
-  EXPECT(Support::isU16(0)     == true);
-  EXPECT(Support::isU16(65535) == true);
-  EXPECT(Support::isU16(65536) == false);
-  EXPECT(Support::isU16(-1)    == false);
+  INFO("Support::isUInt16()");
+  EXPECT(Support::isUInt16(0)     == true);
+  EXPECT(Support::isUInt16(65535) == true);
+  EXPECT(Support::isUInt16(65536) == false);
+  EXPECT(Support::isUInt16(-1)    == false);
 
-  INFO("Support::isU32()");
-  EXPECT(Support::isU32(uint64_t(0xFFFFFFFF)) == true);
-  EXPECT(Support::isU32(uint64_t(0xFFFFFFFF) + 1) == false);
-  EXPECT(Support::isU32(-1) == false);
+  INFO("Support::isUInt32()");
+  EXPECT(Support::isUInt32(uint64_t(0xFFFFFFFF)) == true);
+  EXPECT(Support::isUInt32(uint64_t(0xFFFFFFFF) + 1) == false);
+  EXPECT(Support::isUInt32(-1) == false);
 }
 
 static void testReadWrite() noexcept {
@@ -412,36 +414,6 @@ static void testBitVector() noexcept {
     EXPECT(it.next() == 63);
     EXPECT(!it.hasNext());
   }
-
-  INFO("Support::BitVectorFlipIterator<uint32_t>");
-  {
-    static const uint32_t bits[] = { 0x80000000u, 0x80000000u, 0x00000000u, 0x80000000u };
-    Support::BitVectorFlipIterator<uint32_t> it(bits, ASMJIT_ARRAY_SIZE(bits));
-
-    EXPECT(it.hasNext());
-    EXPECT(it.nextAndFlip() == 31);
-    EXPECT(it.hasNext());
-    EXPECT(it.nextAndFlip() == 32);
-    EXPECT(it.hasNext());
-    EXPECT(it.nextAndFlip() == 63);
-    EXPECT(it.hasNext());
-    EXPECT(it.nextAndFlip() == 64);
-    EXPECT(it.hasNext());
-    EXPECT(it.nextAndFlip() == 127);
-    EXPECT(!it.hasNext());
-  }
-
-  INFO("Support::BitVectorFlipIterator<uint64_t>");
-  {
-    static const uint64_t bits[] = { 0xFFFFFFFFFFFFFFFFu, 0xFFFFFFFFFFFFFFFF, 0, 0 };
-    Support::BitVectorFlipIterator<uint64_t> it(bits, ASMJIT_ARRAY_SIZE(bits));
-
-    EXPECT(it.hasNext());
-    EXPECT(it.nextAndFlip() == 0);
-    EXPECT(it.hasNext());
-    EXPECT(it.nextAndFlip() == 128);
-    EXPECT(!it.hasNext());
-  }
 }
 
 static void testSorting() noexcept {
@@ -453,7 +425,7 @@ static void testSorting() noexcept {
     int arr1[kArraySize] = { 0, 1, -1, 19, 22, 14, -4, 9, 12, 13, -2 };
     int arr2[kArraySize];
 
-    std::memcpy(arr2, arr1, kArraySize * sizeof(int));
+    memcpy(arr2, arr1, kArraySize * sizeof(int));
 
     Support::iSort(arr1, kArraySize);
     Support::qSort(arr2, kArraySize);
@@ -483,14 +455,14 @@ static void testSorting() noexcept {
     }
   }
 
-  INFO("Support::qSort() - Testing qsort and isort having unstable compare function");
+  INFO("Support::qSort() - Testing qsort and isort with an unstable compare function");
   {
     constexpr size_t kArraySize = 5;
 
     float arr1[kArraySize] = { 1.0f, 0.0f, 3.0f, -1.0f, std::numeric_limits<float>::quiet_NaN() };
     float arr2[kArraySize] = { };
 
-    std::memcpy(arr2, arr1, kArraySize * sizeof(float));
+    memcpy(arr2, arr1, kArraySize * sizeof(float));
 
     // We don't test as it's undefined where the NaN would be.
     Support::iSort(arr1, kArraySize);
@@ -498,7 +470,7 @@ static void testSorting() noexcept {
   }
 }
 
-UNIT(asmjit_core_support) {
+UNIT(asmjit_support) {
   testAlignment();
   testBitUtils();
   testIntUtils();

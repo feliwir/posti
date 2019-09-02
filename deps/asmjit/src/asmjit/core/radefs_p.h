@@ -1,17 +1,15 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_RADEFS_P_H
 #define _ASMJIT_CORE_RADEFS_P_H
 
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_COMPILER
+#ifndef ASMJIT_NO_COMPILER
 
-// [Dependencies]
 #include "../core/compiler.h"
 #include "../core/logging.h"
 #include "../core/support.h"
@@ -20,15 +18,15 @@
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_ra
+//! \cond INTERNAL
+//! \addtogroup asmjit_ra
 //! \{
 
 // ============================================================================
 // [Logging]
 // ============================================================================
 
-#ifndef ASMJIT_DISABLE_LOGGING
-# define ASMJIT_RA_LOG_INIT(...) __VA_ARGS__
+#ifndef ASMJIT_NO_LOGGING
 # define ASMJIT_RA_LOG_FORMAT(...)  \
   do {                              \
     if (logger)                     \
@@ -41,7 +39,6 @@ ASMJIT_BEGIN_NAMESPACE
     }                               \
   } while (0)
 #else
-# define ASMJIT_RA_LOG_INIT(...) ((void)0)
 # define ASMJIT_RA_LOG_FORMAT(...) ((void)0)
 # define ASMJIT_RA_LOG_COMPLEX(...) ((void)0)
 #endif
@@ -62,21 +59,21 @@ typedef ZoneVector<RAWorkReg*> RAWorkRegs;
 // ============================================================================
 
 struct RAStrategy {
+  uint8_t _type;
+
   enum StrategyType : uint32_t {
     kStrategySimple  = 0,
     kStrategyComplex = 1
   };
 
   inline RAStrategy() noexcept { reset(); }
-  inline void reset() noexcept { std::memset(this, 0, sizeof(*this)); }
+  inline void reset() noexcept { memset(this, 0, sizeof(*this)); }
 
   inline uint32_t type() const noexcept { return _type; }
   inline void setType(uint32_t type) noexcept { _type = uint8_t(type); }
 
   inline bool isSimple() const noexcept { return _type == kStrategySimple; }
   inline bool isComplex() const noexcept { return _type >= kStrategyComplex; }
-
-  uint8_t _type;
 };
 
 // ============================================================================
@@ -90,16 +87,18 @@ struct RAArchTraits {
     kHasSwap = 0x01u
   };
 
-  // --------------------------------------------------------------------------
-  // [Init / Reset]
-  // --------------------------------------------------------------------------
+  uint8_t _flags[BaseReg::kGroupVirt];
+
+  //! \name Construction & Destruction
+  //! \{
 
   inline RAArchTraits() noexcept { reset(); }
-  inline void reset() noexcept { std::memset(_flags, 0, sizeof(_flags)); }
+  inline void reset() noexcept { memset(_flags, 0, sizeof(_flags)); }
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Accessors
+  //! \{
 
   inline bool hasFlag(uint32_t group, uint32_t flag) const noexcept { return (_flags[group] & flag) != 0; }
   inline bool hasSwap(uint32_t group) const noexcept { return hasFlag(group, kHasSwap); }
@@ -114,11 +113,7 @@ struct RAArchTraits {
     return _flags[group];
   }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  uint8_t _flags[BaseReg::kGroupVirt];
+  //! \}
 };
 
 // ============================================================================
@@ -127,51 +122,26 @@ struct RAArchTraits {
 
 //! Count of virtual or physical registers per group.
 //!
-//! NOTE: This class uses 8-bit integers to represent counters, it's only used
+//! \note This class uses 8-bit integers to represent counters, it's only used
 //! in places where this is sufficient - for example total count of machine's
 //! physical registers, count of virtual registers per instruction, etc. There
 //! is also `RALiveCount`, which uses 32-bit integers and is indeed much safer.
 struct RARegCount {
-  // --------------------------------------------------------------------------
-  // [Reset]
-  // --------------------------------------------------------------------------
+  union {
+    uint8_t _regs[4];
+    uint32_t _packed;
+  };
 
-  //! Reset all counters to zero.
+  //! \name Construction & Destruction
+  //! \{
+
+  //! Resets all counters to zero.
   inline void reset() noexcept { _packed = 0; }
 
-  // --------------------------------------------------------------------------
-  // [Operators]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Get register count by a register `group`.
-  inline uint32_t get(uint32_t group) const noexcept {
-    ASMJIT_ASSERT(group < BaseReg::kGroupVirt);
-
-    uint32_t shift = Support::byteShiftOfDWordStruct(group);
-    return (_packed >> shift) & uint32_t(0xFF);
-  }
-
-  //! Set register count by a register `group`.
-  inline void set(uint32_t group, uint32_t n) noexcept {
-    ASMJIT_ASSERT(group < BaseReg::kGroupVirt);
-    ASMJIT_ASSERT(n <= 0xFF);
-
-    uint32_t shift = Support::byteShiftOfDWordStruct(group);
-    _packed = (_packed & ~uint32_t(0xFF << shift)) + (n << shift);
-  }
-
-  //! Add register count by a register `group`.
-  inline void add(uint32_t group, uint32_t n = 1) noexcept {
-    ASMJIT_ASSERT(group < BaseReg::kGroupVirt);
-    ASMJIT_ASSERT(0xFF - uint32_t(_regs[group]) >= n);
-
-    uint32_t shift = Support::byteShiftOfDWordStruct(group);
-    _packed += n << shift;
-  }
-
-  // --------------------------------------------------------------------------
-  // [Operator OVerload]
-  // --------------------------------------------------------------------------
+  //! \name Overloaded Operators
+  //! \{
 
   inline uint8_t& operator[](uint32_t index) noexcept {
     ASMJIT_ASSERT(index < BaseReg::kGroupVirt);
@@ -188,15 +158,43 @@ struct RARegCount {
   inline bool operator==(const RARegCount& other) const noexcept { return _packed == other._packed; }
   inline bool operator!=(const RARegCount& other) const noexcept { return _packed != other._packed; }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  union {
-    uint8_t _regs[4];
-    uint32_t _packed;
-  };
+  //! \name Utilities
+  //! \{
+
+  //! Returns the count of registers by the given register `group`.
+  inline uint32_t get(uint32_t group) const noexcept {
+    ASMJIT_ASSERT(group < BaseReg::kGroupVirt);
+
+    uint32_t shift = Support::byteShiftOfDWordStruct(group);
+    return (_packed >> shift) & uint32_t(0xFF);
+  }
+
+  //! Sets the register count by a register `group`.
+  inline void set(uint32_t group, uint32_t n) noexcept {
+    ASMJIT_ASSERT(group < BaseReg::kGroupVirt);
+    ASMJIT_ASSERT(n <= 0xFF);
+
+    uint32_t shift = Support::byteShiftOfDWordStruct(group);
+    _packed = (_packed & ~uint32_t(0xFF << shift)) + (n << shift);
+  }
+
+  //! Adds the register count by a register `group`.
+  inline void add(uint32_t group, uint32_t n = 1) noexcept {
+    ASMJIT_ASSERT(group < BaseReg::kGroupVirt);
+    ASMJIT_ASSERT(0xFF - uint32_t(_regs[group]) >= n);
+
+    uint32_t shift = Support::byteShiftOfDWordStruct(group);
+    _packed += n << shift;
+  }
+
+  //! \}
 };
+
+// ============================================================================
+// [asmjit::RARegIndex]
+// ============================================================================
 
 struct RARegIndex : public RARegCount {
   //! Build register indexes based on the given `count` of registers.
@@ -217,9 +215,10 @@ struct RARegIndex : public RARegCount {
 
 //! Registers mask.
 struct RARegMask {
-  // --------------------------------------------------------------------------
-  // [Consturction / Destruction]
-  // --------------------------------------------------------------------------
+  uint32_t _masks[BaseReg::kGroupVirt];
+
+  //! \name Construction & Destruction
+  //! \{
 
   inline void init(const RARegMask& other) noexcept {
     for (uint32_t i = 0; i < BaseReg::kGroupVirt; i++)
@@ -232,51 +231,10 @@ struct RARegMask {
       _masks[i] = 0;
   }
 
-  // --------------------------------------------------------------------------
-  // [IsEmpty / Has]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Get whether all register masks are zero (empty).
-  inline bool empty() const noexcept {
-    uint32_t m = 0;
-    for (uint32_t i = 0; i < BaseReg::kGroupVirt; i++)
-      m |= _masks[i];
-    return m == 0;
-  }
-
-  inline bool has(uint32_t group, uint32_t mask = 0xFFFFFFFFu) const noexcept {
-    ASMJIT_ASSERT(group < BaseReg::kGroupVirt);
-    return (_masks[group] & mask) != 0;
-  }
-
-  // --------------------------------------------------------------------------
-  // [Operators]
-  // --------------------------------------------------------------------------
-
-  template<class Operator>
-  inline void op(const RARegMask& other) noexcept {
-    for (uint32_t i = 0; i < BaseReg::kGroupVirt; i++)
-      _masks[i] = Operator::op(_masks[i], other._masks[i]);
-  }
-
-  template<class Operator>
-  inline void op(uint32_t group, uint32_t input) noexcept {
-    _masks[group] = Operator::op(_masks[group], input);
-  }
-
-  // --------------------------------------------------------------------------
-  // [Operator Overload]
-  // --------------------------------------------------------------------------
-
-  inline uint32_t& operator[](uint32_t index) noexcept {
-    ASMJIT_ASSERT(index < BaseReg::kGroupVirt);
-    return _masks[index];
-  }
-
-  inline const uint32_t& operator[](uint32_t index) const noexcept {
-    ASMJIT_ASSERT(index < BaseReg::kGroupVirt);
-    return _masks[index];
-  }
+  //! \name Overloaded Operators
+  //! \{
 
   inline RARegMask& operator=(const RARegMask& other) noexcept = default;
 
@@ -291,11 +249,46 @@ struct RARegMask {
     return !operator==(other);
   }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
+  inline uint32_t& operator[](uint32_t index) noexcept {
+    ASMJIT_ASSERT(index < BaseReg::kGroupVirt);
+    return _masks[index];
+  }
 
-  uint32_t _masks[BaseReg::kGroupVirt];
+  inline const uint32_t& operator[](uint32_t index) const noexcept {
+    ASMJIT_ASSERT(index < BaseReg::kGroupVirt);
+    return _masks[index];
+  }
+
+  //! \}
+
+  //! \name Utilities
+  //! \{
+
+  //! Tests whether all register masks are zero (empty).
+  inline bool empty() const noexcept {
+    uint32_t m = 0;
+    for (uint32_t i = 0; i < BaseReg::kGroupVirt; i++)
+      m |= _masks[i];
+    return m == 0;
+  }
+
+  inline bool has(uint32_t group, uint32_t mask = 0xFFFFFFFFu) const noexcept {
+    ASMJIT_ASSERT(group < BaseReg::kGroupVirt);
+    return (_masks[group] & mask) != 0;
+  }
+
+  template<class Operator>
+  inline void op(const RARegMask& other) noexcept {
+    for (uint32_t i = 0; i < BaseReg::kGroupVirt; i++)
+      _masks[i] = Operator::op(_masks[i], other._masks[i]);
+  }
+
+  template<class Operator>
+  inline void op(uint32_t group, uint32_t input) noexcept {
+    _masks[group] = Operator::op(_masks[group], input);
+  }
+
+  //! \}
 };
 
 // ============================================================================
@@ -308,6 +301,8 @@ struct RARegMask {
 //! register allocation inside a block or loop it cannot have clobbered and/or
 //! fixed registers, etc...
 struct RARegsStats {
+  uint32_t _packed;
+
   enum Index : uint32_t {
     kIndexUsed       = 0,
     kIndexFixed      = 8,
@@ -324,33 +319,32 @@ struct RARegsStats {
   inline void combineWith(const RARegsStats& other) noexcept { _packed |= other._packed; }
 
   inline bool hasUsed() const noexcept { return (_packed & kMaskUsed) != 0u; }
-  inline bool hasUsed(uint32_t group) const noexcept { return (_packed & Support::mask(kIndexUsed + group)) != 0u; }
-  inline void makeUsed(uint32_t group) noexcept { _packed |= Support::mask(kIndexUsed + group); }
+  inline bool hasUsed(uint32_t group) const noexcept { return (_packed & Support::bitMask(kIndexUsed + group)) != 0u; }
+  inline void makeUsed(uint32_t group) noexcept { _packed |= Support::bitMask(kIndexUsed + group); }
 
   inline bool hasFixed() const noexcept { return (_packed & kMaskFixed) != 0u; }
-  inline bool hasFixed(uint32_t group) const noexcept { return (_packed & Support::mask(kIndexFixed + group)) != 0u; }
-  inline void makeFixed(uint32_t group) noexcept { _packed |= Support::mask(kIndexFixed + group); }
+  inline bool hasFixed(uint32_t group) const noexcept { return (_packed & Support::bitMask(kIndexFixed + group)) != 0u; }
+  inline void makeFixed(uint32_t group) noexcept { _packed |= Support::bitMask(kIndexFixed + group); }
 
   inline bool hasClobbered() const noexcept { return (_packed & kMaskClobbered) != 0u; }
-  inline bool hasClobbered(uint32_t group) const noexcept { return (_packed & Support::mask(kIndexClobbered + group)) != 0u; }
-  inline void makeClobbered(uint32_t group) noexcept { _packed |= Support::mask(kIndexClobbered + group); }
-
-  uint32_t _packed;
+  inline bool hasClobbered(uint32_t group) const noexcept { return (_packed & Support::bitMask(kIndexClobbered + group)) != 0u; }
+  inline void makeClobbered(uint32_t group) noexcept { _packed |= Support::bitMask(kIndexClobbered + group); }
 };
 
 // ============================================================================
 // [asmjit::RALiveCount]
 // ============================================================================
 
-//! Count of live register, per group.
+//! Count of live registers, per group.
 class RALiveCount {
 public:
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  uint32_t n[BaseReg::kGroupVirt];
+
+  //! \name Construction & Destruction
+  //! \{
 
   inline RALiveCount() noexcept { reset(); }
-  inline RALiveCount(const RALiveCount& other) noexcept { init(other); }
+  inline RALiveCount(const RALiveCount& other) noexcept = default;
 
   inline void init(const RALiveCount& other) noexcept {
     for (uint32_t group = 0; group < BaseReg::kGroupVirt; group++)
@@ -362,9 +356,20 @@ public:
       n[group] = 0;
   }
 
-  // --------------------------------------------------------------------------
-  // [Ops]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Overloaded Operators
+  //! \{
+
+  inline RALiveCount& operator=(const RALiveCount& other) noexcept = default;
+
+  inline uint32_t& operator[](uint32_t group) noexcept { return n[group]; }
+  inline const uint32_t& operator[](uint32_t group) const noexcept { return n[group]; }
+
+  //! \}
+
+  //! \name Utilities
+  //! \{
 
   template<class Operator>
   inline void op(const RALiveCount& other) noexcept {
@@ -372,16 +377,7 @@ public:
       n[group] = Operator::op(n[group], other.n[group]);
   }
 
-  inline RALiveCount& operator=(const RALiveCount& other) noexcept = default;
-
-  inline uint32_t& operator[](uint32_t group) noexcept { return n[group]; }
-  inline const uint32_t& operator[](uint32_t group) const noexcept { return n[group]; }
-
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  uint32_t n[BaseReg::kGroupVirt];
+  //! \}
 };
 
 // ============================================================================
@@ -389,14 +385,15 @@ public:
 // ============================================================================
 
 struct LiveInterval {
+  uint32_t a, b;
+
   enum Misc : uint32_t {
     kNaN = 0,
     kInf = 0xFFFFFFFFu
   };
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! \name Construction & Destruction
+  //! \{
 
   inline LiveInterval() noexcept : a(0), b(0) {}
   inline LiveInterval(uint32_t a, uint32_t b) noexcept : a(a), b(b) {}
@@ -409,18 +406,22 @@ struct LiveInterval {
   inline void init(const LiveInterval& other) noexcept { init(other.a, other.b); }
   inline void reset() noexcept { init(0, 0); }
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Overloaded Operators
+  //! \{
+
+  inline LiveInterval& operator=(const LiveInterval& other) = default;
+
+  //! \}
+
+  //! \name Accessors
+  //! \{
 
   inline bool isValid() const noexcept { return a < b; }
   inline uint32_t width() const noexcept { return b - a; }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  uint32_t a, b;
+  //! \}
 };
 
 // ============================================================================
@@ -432,9 +433,8 @@ class RALiveSpan : public LiveInterval, public T {
 public:
   typedef T DataType;
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! \name Construction & Destruction
+  //! \{
 
   inline RALiveSpan() noexcept : LiveInterval(), T() {}
   inline RALiveSpan(const RALiveSpan<T>& other) noexcept : LiveInterval(other), T() {}
@@ -456,6 +456,15 @@ public:
     LiveInterval::init(interval);
     T::init(data);
   }
+
+  //! \}
+
+  //! \name Overloaded Operators
+  //! \{
+
+  inline RALiveSpan& operator=(const RALiveSpan& other) = default;
+
+  //! \}
 };
 
 // ============================================================================
@@ -468,23 +477,20 @@ public:
   ASMJIT_NONCOPYABLE(RALiveSpans<T>)
 
   typedef typename T::DataType DataType;
+  ZoneVector<T> _data;
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! \name Construction & Destruction
+  //! \{
 
   inline RALiveSpans() noexcept : _data() {}
-
-  // --------------------------------------------------------------------------
-  // [Reset]
-  // --------------------------------------------------------------------------
 
   inline void reset() noexcept { _data.reset(); }
   inline void release(ZoneAllocator* allocator) noexcept { _data.release(allocator); }
 
-  // --------------------------------------------------------------------------
-  // [Interface]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Accessors
+  //! \{
 
   inline bool empty() const noexcept { return _data.empty(); }
   inline uint32_t size() const noexcept { return _data.size(); }
@@ -492,12 +498,17 @@ public:
   inline T* data() noexcept { return _data.data(); }
   inline const T* data() const noexcept { return _data.data(); }
 
-  inline void swap(RALiveSpans<T>& other) noexcept { _data.swap(other._data); }
-
   inline bool isOpen() const noexcept {
     uint32_t size = _data.size();
     return size > 0 && _data[size - 1].b == LiveInterval::kInf;
   }
+
+  //! \}
+
+  //! \name Utilities
+  //! \{
+
+  inline void swap(RALiveSpans<T>& other) noexcept { _data.swap(other._data); }
 
   //! Open the current live span.
   ASMJIT_INLINE Error openAt(ZoneAllocator* allocator, uint32_t start, uint32_t end) noexcept {
@@ -530,7 +541,7 @@ public:
 
   //! Returns the sum of width of all spans.
   //!
-  //! NOTE: Don't overuse, this iterates over all spans so it's O(N).
+  //! \note Don't overuse, this iterates over all spans so it's O(N).
   //! It should be only called once and then cached.
   ASMJIT_INLINE uint32_t width() const noexcept {
     uint32_t width = 0;
@@ -633,11 +644,7 @@ public:
     }
   }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  ZoneVector<T> _data;
+  //! \}
 };
 
 // ============================================================================
@@ -647,23 +654,28 @@ public:
 //! Statistics about a register liveness.
 class RALiveStats {
 public:
+  uint32_t _width;
+  float _freq;
+  float _priority;
+
+  //! \name Construction & Destruction
+  //! \{
+
   inline RALiveStats()
     : _width(0),
-      _freq(0.0f) {}
+      _freq(0.0f),
+      _priority(0.0f) {}
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Accessors
+  //! \{
 
   inline uint32_t width() const noexcept { return _width; }
   inline float freq() const noexcept { return _freq; }
+  inline float priority() const noexcept { return _priority; }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  uint32_t _width;
-  float _freq;
+  //! \}
 };
 
 // ============================================================================
@@ -671,6 +683,8 @@ public:
 // ============================================================================
 
 struct LiveRegData {
+  uint32_t id;
+
   inline LiveRegData() noexcept : id(BaseReg::kIdBad) {}
   inline explicit LiveRegData(uint32_t id) noexcept : id(id) {}
   inline explicit LiveRegData(const LiveRegData& other) noexcept : id(other.id) {}
@@ -679,12 +693,6 @@ struct LiveRegData {
 
   inline bool operator==(const LiveRegData& other) const noexcept { return id == other.id; }
   inline bool operator!=(const LiveRegData& other) const noexcept { return id != other.id; }
-
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  uint32_t id;
 };
 
 typedef RALiveSpan<LiveRegData> LiveRegSpan;
@@ -698,6 +706,32 @@ typedef RALiveSpans<LiveRegSpan> LiveRegSpans;
 //! contains information about its access (Read|Write) and allocation slots
 //! (Use|Out) that are used by the register allocator and liveness analysis.
 struct RATiedReg {
+  //! WorkReg id.
+  uint32_t _workId;
+  //! Allocation flags.
+  uint32_t _flags;
+  //! Registers where input {R|X} can be allocated to.
+  uint32_t _allocableRegs;
+  //! Indexes used to rewrite USE regs.
+  uint32_t _useRewriteMask;
+  //! Indexes used to rewrite OUT regs.
+  uint32_t _outRewriteMask;
+
+  union {
+    struct {
+      //! How many times the VirtReg is referenced in all operands.
+      uint8_t _refCount;
+      //! Physical register for use operation (ReadOnly / ReadWrite).
+      uint8_t _useId;
+      //! Physical register for out operation (WriteOnly).
+      uint8_t _outId;
+      //! Reserved for future use (padding).
+      uint8_t _rmSize;
+    };
+    //! Packed data.
+    uint32_t _packed;
+  };
+
   //! Flags.
   //!
   //! Register access information is encoded in 4 flags in total:
@@ -721,37 +755,39 @@ struct RATiedReg {
   //! the register allocator will first allocate USE registers, and then assign
   //! OUT registers independently of USE registers.
   enum Flags : uint32_t {
-    kRead        = OpInfo::kRead,        //!< Register is read.
-    kWrite       = OpInfo::kWrite,       //!< Register is written.
-    kRW          = OpInfo::kRW,          //!< Register read and written.
-    kUse         = OpInfo::kUse,         //!< Register has a USE slot (Read/ReadWrite).
-    kOut         = OpInfo::kOut,         //!< Register has an OUT slot (WriteOnly).
+    kRead         = OpRWInfo::kRead,     //!< Register is read.
+    kWrite        = OpRWInfo::kWrite,    //!< Register is written.
+    kRW           = OpRWInfo::kRW,       //!< Register both read and written.
 
-    kUseFixed    = 0x00000010u,          //!< Register has a fixed USE slot.
-    kOutFixed    = 0x00000020u,          //!< Register has a fixed OUT slot.
+    kUse          = 0x00000100u,         //!< Register has a USE slot (read/rw).
+    kOut          = 0x00000200u,         //!< Register has an OUT slot (write-only).
+    kUseRM        = 0x00000400u,         //!< Register in USE slot can be patched to memory.
+    kOutRM        = 0x00000800u,         //!< Register in OUT slot can be patched to memory.
 
-    // TODO: Maybe we don't need these at all.
-    kUseCall     = 0x00000040u,          //!< Function-call register argument (USE).
-    kOutCall     = 0x00000080u,          //!< Function-call register return (OUT).
+    kUseFixed     = 0x00001000u,         //!< Register has a fixed USE slot.
+    kOutFixed     = 0x00002000u,         //!< Register has a fixed OUT slot.
+    kUseDone      = 0x00004000u,         //!< Register USE slot has been allocated.
+    kOutDone      = 0x00008000u,         //!< Register OUT slot has been allocated.
 
-    kUseDone     = 0x00000100u,          //!< Register USE slot has been allocated.
-    kOutDone     = 0x00000200u,          //!< Register OUT slot has been allocated
-
-    kLast        = 0x00000400u,          //!< Last occurrence of this VirtReg in basic block.
-    kKill        = 0x00000800u,          //!< Kill this VirtReg after use.
+    kDuplicate    = 0x00010000u,         //!< Register must be duplicated (function call only).
+    kLast         = 0x00020000u,         //!< Last occurrence of this VirtReg in basic block.
+    kKill         = 0x00040000u,         //!< Kill this VirtReg after use.
 
     // Architecture specific flags are used during RATiedReg building to ensure
     // that architecture-specific constraints are handled properly. These flags
     // are not really needed after RATiedReg[] is built and copied to `RAInst`.
 
-    kX86Gpb      = 0x00001000u           //!< This tied references GPB-LO or GPB-HI.
+    kX86Gpb       = 0x01000000u          //!< This RATiedReg references GPB-LO or GPB-HI.
   };
 
-  // --------------------------------------------------------------------------
-  // [Init / Reset]
-  // --------------------------------------------------------------------------
+  static_assert(kRead  == 0x1, "RATiedReg::kRead flag must be 0x1");
+  static_assert(kWrite == 0x2, "RATiedReg::kWrite flag must be 0x2");
+  static_assert(kRW    == 0x3, "RATiedReg::kRW combination must be 0x3");
 
-  ASMJIT_INLINE void init(uint32_t workId, uint32_t flags, uint32_t allocableRegs, uint32_t useId, uint32_t useRewriteMask, uint32_t outId, uint32_t outRewriteMask) noexcept {
+  //! \name Construction & Destruction
+  //! \{
+
+  ASMJIT_INLINE void init(uint32_t workId, uint32_t flags, uint32_t allocableRegs, uint32_t useId, uint32_t useRewriteMask, uint32_t outId, uint32_t outRewriteMask, uint32_t rmSize = 0) noexcept {
     _workId = workId;
     _flags = flags;
     _allocableRegs = allocableRegs;
@@ -760,39 +796,54 @@ struct RATiedReg {
     _refCount = 1;
     _useId = uint8_t(useId);
     _outId = uint8_t(outId);
-    _reserved = 0;
+    _rmSize = uint8_t(rmSize);
   }
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Get the associated WorkReg id.
+  //! \name Overloaded Operators
+  //! \{
+
+  inline RATiedReg& operator=(const RATiedReg& other) noexcept = default;
+
+  //! \}
+
+  //! \name Accessors
+  //! \{
+
+  //! Returns the associated WorkReg id.
   inline uint32_t workId() const noexcept { return _workId; }
 
-  //! Check if the given `flag` is set, see `Flags`.
+  //! Checks if the given `flag` is set, see `Flags`.
   inline bool hasFlag(uint32_t flag) const noexcept { return (_flags & flag) != 0; }
 
-  //! Get tied register flags, see `Flags`.
+  //! Returns TiedReg flags, see `RATiedReg::Flags`.
   inline uint32_t flags() const noexcept { return _flags; }
-  //! Add tied register flags, see `Flags`.
+  //! Adds tied register flags, see `Flags`.
   inline void addFlags(uint32_t flags) noexcept { _flags |= flags; }
 
-  //! Get whether the register is read (writes `true` also if it's Read/Write).
+  //! Tests whether the register is read (writes `true` also if it's Read/Write).
   inline bool isRead() const noexcept { return hasFlag(kRead); }
-  //! Get whether the register is written (writes `true` also if it's Read/Write).
+  //! Tests whether the register is written (writes `true` also if it's Read/Write).
   inline bool isWrite() const noexcept { return hasFlag(kWrite); }
-  //! Get whether the register is read only.
+  //! Tests whether the register is read only.
   inline bool isReadOnly() const noexcept { return (_flags & kRW) == kRead; }
-  //! Get whether the register is write only.
+  //! Tests whether the register is write only.
   inline bool isWriteOnly() const noexcept { return (_flags & kRW) == kWrite; }
-  //! Get whether the register is read and written.
+  //! Tests whether the register is read and written.
   inline bool isReadWrite() const noexcept { return (_flags & kRW) == kRW; }
 
-  //! Get whether the tied register has use operand (Read/ReadWrite).
+  //! Tests whether the tied register has use operand (Read/ReadWrite).
   inline bool isUse() const noexcept { return hasFlag(kUse); }
-  //! Get whether the tied register has out operand (Write).
+  //! Tests whether the tied register has out operand (Write).
   inline bool isOut() const noexcept { return hasFlag(kOut); }
+
+  //! Tests whether the USE slot can be patched to memory operand.
+  inline bool hasUseRM() const noexcept { return hasFlag(kUseRM); }
+  //! Tests whether the OUT slot can be patched to memory operand.
+  inline bool hasOutRM() const noexcept { return hasFlag(kOutRM); }
+
+  inline uint32_t rmSize() const noexcept { return _rmSize; }
 
   inline void makeReadOnly() noexcept {
     _flags = (_flags & ~(kOut | kWrite)) | kUse;
@@ -806,12 +857,15 @@ struct RATiedReg {
     _useRewriteMask = 0;
   }
 
-  //! Get whether this register (and the instruction it's part of) appears last in the basic block.
+  //! Tests whether the register would duplicate.
+  inline bool isDuplicate() const noexcept { return hasFlag(kDuplicate); }
+
+  //! Tests whether the register (and the instruction it's part of) appears last in the basic block.
   inline bool isLast() const noexcept { return hasFlag(kLast); }
-  //! Get whether this register should be killed after USEd and/or OUTed.
+  //! Tests whether the register should be killed after USEd and/or OUTed.
   inline bool isKill() const noexcept { return hasFlag(kKill); }
 
-  //! Get whether this register is OUT or KILL (used internally by local register allocator).
+  //! Tests whether the register is OUT or KILL (used internally by local register allocator).
   inline bool isOutOrKill() const noexcept { return hasFlag(kOut | kKill); }
 
   inline uint32_t allocableRegs() const noexcept { return _allocableRegs; }
@@ -819,22 +873,22 @@ struct RATiedReg {
   inline uint32_t refCount() const noexcept { return _refCount; }
   inline void addRefCount(uint32_t n = 1) noexcept { _refCount = uint8_t(_refCount + n); }
 
-  //! Get whether the register must be allocated to a fixed physical register before it's used.
+  //! Tests whether the register must be allocated to a fixed physical register before it's used.
   inline bool hasUseId() const noexcept { return _useId != BaseReg::kIdBad; }
-  //! Get whether the register must be allocated to a fixed physical register before it's written.
+  //! Tests whether the register must be allocated to a fixed physical register before it's written.
   inline bool hasOutId() const noexcept { return _outId != BaseReg::kIdBad; }
 
-  //! Get a physical register used for 'use' operation.
+  //! Returns a physical register id used for 'use' operation.
   inline uint32_t useId() const noexcept { return _useId; }
-  //! Get a physical register used for 'out' operation.
+  //! Returns a physical register id used for 'out' operation.
   inline uint32_t outId() const noexcept { return _outId; }
 
   inline uint32_t useRewriteMask() const noexcept { return _useRewriteMask; }
   inline uint32_t outRewriteMask() const noexcept { return _outRewriteMask; }
 
-  //! Set a physical register used for 'use' operation.
+  //! Sets a physical register used for 'use' operation.
   inline void setUseId(uint32_t index) noexcept { _useId = uint8_t(index); }
-  //! Set a physical register used for 'out' operation.
+  //! Sets a physical register used for 'out' operation.
   inline void setOutId(uint32_t index) noexcept { _outId = uint8_t(index); }
 
   inline bool isUseDone() const noexcept { return hasFlag(kUseDone); }
@@ -843,31 +897,7 @@ struct RATiedReg {
   inline void markUseDone() noexcept { addFlags(kUseDone); }
   inline void markOutDone() noexcept { addFlags(kUseDone); }
 
-  // --------------------------------------------------------------------------
-  // [Operator Overload]
-  // --------------------------------------------------------------------------
-
-  inline RATiedReg& operator=(const RATiedReg& other) noexcept = default;
-
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  uint32_t _workId;                      //!< WorkReg id.
-  uint32_t _flags;                       //!< Allocation flags.
-  uint32_t _allocableRegs;               //!< Registers where input {R|X} can be allocated to.
-  uint32_t _useRewriteMask;              //!< Indexes used to rewrite USE regs.
-  uint32_t _outRewriteMask;              //!< Indexes used to rewrite OUT regs.
-
-  union {
-    struct {
-      uint8_t _refCount;                 //!< How many times the VirtReg is referenced in all operands.
-      uint8_t _useId;                    //!< Physical register for use operation (ReadOnly / ReadWrite).
-      uint8_t _outId;                    //!< Physical register for out operation (WriteOnly).
-      uint8_t _reserved;                 //!< Index of OUT operand or 0xFF if none.
-    };
-    uint32_t _packed;                    //!< Packed data.
-  };
+  //! \}
 };
 
 // ============================================================================
@@ -878,27 +908,75 @@ class RAWorkReg {
 public:
   ASMJIT_NONCOPYABLE(RAWorkReg)
 
+  //! RAPass specific ID used during analysis and allocation.
+  uint32_t _workId;
+  //! Copy of ID used by `VirtReg`.
+  uint32_t _virtId;
+
+  //! Permanent association with `VirtReg`.
+  VirtReg* _virtReg;
+  //! Temporary association with `RATiedReg`.
+  RATiedReg* _tiedReg;
+  //! Stack slot associated with the register.
+  RAStackSlot* _stackSlot;
+
+  //! Copy of a signature used by `VirtReg`.
+  RegInfo _info;
+  //! RAPass specific flags used during analysis and allocation.
+  uint32_t _flags;
+  //! IDs of all physical registers this WorkReg has been allocated to.
+  uint32_t _allocatedMask;
+  //! IDs of all physical registers that are clobbered during the lifetime of
+  //! this WorkReg.
+  //!
+  //! This mask should be updated by `RAPass::buildLiveness()`, because it's
+  //! global and should be updated after unreachable code has been removed.
+  uint32_t _clobberSurvivalMask;
+
+  //! A byte-mask where each bit represents one valid byte of the register.
+  uint64_t _regByteMask;
+
+  //! Argument index (or `kNoArgIndex` if none).
+  uint8_t _argIndex;
+  //! Global home register ID (if any, assigned by RA).
+  uint8_t _homeRegId;
+  //! Global hint register ID (provided by RA or user).
+  uint8_t _hintRegId;
+
+  //! Live spans of the `VirtReg`.
+  LiveRegSpans _liveSpans;
+  //! Live statistics.
+  RALiveStats _liveStats;
+
+  //! All nodes that read/write this VirtReg/WorkReg.
+  ZoneVector<BaseNode*> _refs;
+  //! All nodes that write to this VirtReg/WorkReg.
+  ZoneVector<BaseNode*> _writes;
+
   enum Ids : uint32_t {
-    kIdNone               = 0xFFFFFFFFu
+    kIdNone = 0xFFFFFFFFu
   };
 
   enum Flags : uint32_t {
-    kFlagCoalesced        = 0x00000001u, //!< Has been coalesced to another WorkReg.
-    kFlagStackUsed        = 0x00000002u, //!< Stack slot has to be allocated.
-    kFlagStackPreferred   = 0x00000004u, //!< Stack allocation is preferred.
-    kFlagStackArgToStack  = 0x00000008u, //!< Marked for stack argument reassignment.
+    //! Has been coalesced to another WorkReg.
+    kFlagCoalesced = 0x00000001u,
+    //! Stack slot has to be allocated.
+    kFlagStackUsed = 0x00000002u,
+    //! Stack allocation is preferred.
+    kFlagStackPreferred = 0x00000004u,
+    //! Marked for stack argument reassignment.
+    kFlagStackArgToStack = 0x00000008u,
 
     // TODO: Used?
     kFlagDirtyStats       = 0x80000000u
   };
 
   enum ArgIndex : uint32_t {
-    kNoArgIndex      = 0xFFu
+    kNoArgIndex = 0xFFu
   };
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! \name Construction & Destruction
+  //! \{
 
   ASMJIT_INLINE RAWorkReg(VirtReg* vReg, uint32_t workId) noexcept
     : _workId(workId),
@@ -909,15 +987,19 @@ public:
       _info(vReg->info()),
       _flags(kFlagDirtyStats),
       _allocatedMask(0),
+      _clobberSurvivalMask(0),
+      _regByteMask(0),
       _argIndex(kNoArgIndex),
-      _homeId(BaseReg::kIdBad),
+      _homeRegId(BaseReg::kIdBad),
+      _hintRegId(BaseReg::kIdBad),
       _liveSpans(),
       _liveStats(),
       _refs() {}
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Accessors
+  //! \{
 
   inline uint32_t workId() const noexcept { return _workId; }
   inline uint32_t virtId() const noexcept { return _virtId; }
@@ -937,11 +1019,12 @@ public:
   inline bool isStackPreferred() const noexcept { return hasFlag(kFlagStackPreferred); }
   inline void markStackPreferred() noexcept { addFlags(kFlagStackPreferred); }
 
-  //! Get whether this RAWorkReg has been coalesced with another one (cannot be used anymore).
+  //! Tests whether this RAWorkReg has been coalesced with another one (cannot be used anymore).
   inline bool isCoalesced() const noexcept { return hasFlag(kFlagCoalesced); }
 
   inline const RegInfo& info() const noexcept { return _info; }
   inline uint32_t group() const noexcept { return _info.group(); }
+  inline uint32_t signature() const noexcept { return _info.signature(); }
 
   inline VirtReg* virtReg() const noexcept { return _virtReg; }
 
@@ -963,42 +1046,30 @@ public:
   inline uint32_t argIndex() const noexcept { return _argIndex; }
   inline void setArgIndex(uint32_t index) noexcept { _argIndex = uint8_t(index); }
 
-  inline bool hasHomeId() const noexcept { return _homeId != BaseReg::kIdBad; }
-  inline uint32_t homeId() const noexcept { return _homeId; }
-  inline void setHomeId(uint32_t physId) noexcept { _homeId = uint8_t(physId); }
+  inline bool hasHomeRegId() const noexcept { return _homeRegId != BaseReg::kIdBad; }
+  inline uint32_t homeRegId() const noexcept { return _homeRegId; }
+  inline void setHomeRegId(uint32_t physId) noexcept { _homeRegId = uint8_t(physId); }
+
+  inline bool hasHintRegId() const noexcept { return _hintRegId != BaseReg::kIdBad; }
+  inline uint32_t hintRegId() const noexcept { return _hintRegId; }
+  inline void setHintRegId(uint32_t physId) noexcept { _hintRegId = uint8_t(physId); }
 
   inline uint32_t allocatedMask() const noexcept { return _allocatedMask; }
   inline void addAllocatedMask(uint32_t mask) noexcept { _allocatedMask |= mask; }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
+  inline uint32_t clobberSurvivalMask() const noexcept { return _clobberSurvivalMask; }
+  inline void addClobberSurvivalMask(uint32_t mask) noexcept { _clobberSurvivalMask |= mask; }
 
-  uint32_t _workId;                      //!< RAPass specific ID used during analysis and allocation.
-  uint32_t _virtId;                      //!< Copy of ID used by `VirtReg`.
+  inline uint64_t regByteMask() const noexcept { return _regByteMask; }
+  inline void setRegByteMask(uint64_t mask) noexcept { _regByteMask = mask; }
 
-  VirtReg* _virtReg;                     //!< Permanent association with `VirtReg`.
-  RATiedReg* _tiedReg;                   //!< Temporary association with `RATiedReg`.
-  RAStackSlot* _stackSlot;               //!< Stack slot associated with the register.
-
-  RegInfo _info;                         //!< Copy of a signature used by `VirtReg`.
-  uint32_t _flags;                       //!< RAPass specific flags used during analysis and allocation.
-  uint32_t _allocatedMask;               //!< IDs of all physical registers this WorkReg has been allocated to.
-
-  uint8_t _argIndex;                     //!< Argument index (or kNoStackArgIndex if none).
-  uint8_t _homeId;                       //!< Global home register ID (if any).
-
-  LiveRegSpans _liveSpans;               //!< Live spans of the `VirtReg`.
-  RALiveStats _liveStats;                //!< Live statistics.
-
-  ZoneVector<BaseNode*> _refs;           //!< All nodes that read/write this VirtReg/WorkReg.
-  ZoneVector<BaseNode*> _writes;         //!< All nodes that write to this VirtReg/WorkReg.
+  //! \}
 };
 
 //! \}
+//! \endcond
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
-#endif // !ASMJIT_DISABLE_COMPILER
+#endif // !ASMJIT_NO_COMPILER
 #endif // _ASMJIT_CORE_RADEFS_P_H

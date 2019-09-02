@@ -1,13 +1,11 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
 #include "../core/constpool.h"
 #include "../core/support.h"
 
@@ -88,7 +86,7 @@ static void ConstPool_addGap(ConstPool* self, size_t offset, size_t size) noexce
 
     // We don't have to check for errors here, if this failed nothing really
     // happened (just the gap won't be visible) and it will fail again at
-    // place where the same check would generate `kErrorNoHeapMemory` error.
+    // place where the same check would generate `kErrorOutOfMemory` error.
     ConstPool::Gap* gap = ConstPool_allocGap(self);
     if (!gap)
       return;
@@ -172,10 +170,10 @@ Error ConstPool::add(const void* data, size_t size, size_t& dstOffset) noexcept 
 
   // Add the initial node to the right index.
   node = ConstPool::Tree::_newNode(_zone, data, size, offset, false);
-  if (!node) return DebugUtils::errored(kErrorNoHeapMemory);
+  if (!node) return DebugUtils::errored(kErrorOutOfMemory);
 
   _tree[treeIndex].insert(node);
-  _alignment = std::max<size_t>(_alignment, size);
+  _alignment = Support::max<size_t>(_alignment, size);
 
   dstOffset = offset;
 
@@ -214,7 +212,7 @@ struct ConstPoolFill {
 
   inline void operator()(const ConstPool::Node* node) noexcept {
     if (!node->_shared)
-      std::memcpy(_dst + node->_offset, node->data(), _dataSize);
+      memcpy(_dst + node->_offset, node->data(), _dataSize);
   }
 
   uint8_t* _dst;
@@ -223,7 +221,7 @@ struct ConstPoolFill {
 
 void ConstPool::fill(void* dst) const noexcept {
   // Clears possible gaps, asmjit should never emit garbage to the output.
-  std::memset(dst, 0, _size);
+  memset(dst, 0, _size);
 
   ConstPoolFill filler(static_cast<uint8_t*>(dst), 1);
   for (size_t i = 0; i < ASMJIT_ARRAY_SIZE(_tree); i++) {
@@ -236,13 +234,13 @@ void ConstPool::fill(void* dst) const noexcept {
 // [asmjit::ConstPool - Unit]
 // ============================================================================
 
-#if defined(ASMJIT_BUILD_TEST)
+#if defined(ASMJIT_TEST)
 UNIT(asmjit_core_const_pool) {
   Zone zone(32384 - Zone::kBlockOverhead);
   ConstPool pool(&zone);
 
   uint32_t i;
-  uint32_t kCount = 1000000;
+  uint32_t kCount = BrokenAPI::hasArg("--quick") ? 1000 : 1000000;
 
   INFO("Adding %u constants to the pool.", kCount);
   {

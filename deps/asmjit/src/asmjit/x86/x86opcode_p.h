@@ -1,35 +1,34 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_X86_X86OPCODE_P_H
 #define _ASMJIT_X86_X86OPCODE_P_H
 
-// [Dependencies]
 #include "../core/logging.h"
-#include "../core/stringbuilder.h"
+#include "../core/string.h"
 #include "../x86/x86globals.h"
 
 ASMJIT_BEGIN_SUB_NAMESPACE(x86)
 
-//! \addtogroup asmjit_x86_api
+//! \cond INTERNAL
+//! \addtogroup asmjit_x86
 //! \{
 
 // ============================================================================
 // [asmjit::x86::Opcode]
 // ============================================================================
 
-//! \internal
-//!
 //! Helper class to store and manipulate X86 opcodes.
 //!
 //! The first 8 least significant bits describe the opcode byte as defined in
 //! ISA manuals, all other bits describe other properties like prefixes, see
 //! `Opcode::Bits` for more information.
 struct Opcode {
+  uint32_t v;
+
   //! Describes a meaning of all bits of AsmJit's 32-bit opcode value.
   //!
   //! This schema is AsmJit specific and has been designed to allow encoding of
@@ -92,7 +91,7 @@ struct Opcode {
   //!   is derived from instruction specification and describes additional shift
   //!   to calculate the final `CDSHL` that will be used in SIB byte.
   //!
-  //! NOTE: Don't reorder any fields here, the shifts and masks were defined
+  //! \note Don't reorder any fields here, the shifts and masks were defined
   //! carefully to make encoding of X86 instructions fast, especially to construct
   //! REX, VEX, and EVEX prefixes in the most efficient way. Changing values defined
   //! by these enums many cause AsmJit to emit invalid binary representations of
@@ -136,6 +135,7 @@ struct Opcode {
     // in `x86assembler.cpp`.
     kMM_XOP08      = 0x08u << kMM_Shift,   // XOP.M8.
     kMM_XOP09      = 0x09u << kMM_Shift,   // XOP.M9.
+    kMM_XOP0A      = 0x0Au << kMM_Shift,   // XOP.MA.
 
     kMM_IsXOP_Shift= kMM_Shift + 3,
     kMM_IsXOP      = kMM_XOP08,
@@ -335,27 +335,32 @@ struct Opcode {
     kFPU_00 = kPP_00 | kMM_00,             // '__' (FPU)
     kFPU_9B = kPP_9B | kMM_00,             // '9B' (FPU)
     kXOP_M8 = kPP_00 | kMM_XOP08,          // 'M8' (XOP)
-    kXOP_M9 = kPP_00 | kMM_XOP09           // 'M9' (XOP)
+    kXOP_M9 = kPP_00 | kMM_XOP09,          // 'M9' (XOP)
+    kXOP_MA = kPP_00 | kMM_XOP0A           // 'MA' (XOP)
   };
 
   // --------------------------------------------------------------------------
   // [Opcode Builder]
   // --------------------------------------------------------------------------
 
-  inline uint32_t get() const noexcept { return v; }
-  inline Opcode& add(uint32_t x) noexcept { return operator+=(x); }
+  ASMJIT_INLINE uint32_t get() const noexcept { return v; }
 
-  inline Opcode& add66h() noexcept { return operator|=(kPP_66); }
-  template<typename T>
-  inline Opcode& add66hIf(T exp) noexcept { return operator|=(uint32_t(exp) << kPP_Shift); }
-  template<typename T>
-  inline Opcode& add66hBySize(T size) noexcept { return add66hIf(size == 2); }
+  ASMJIT_INLINE bool hasW() const noexcept { return (v & kW) != 0; }
+  ASMJIT_INLINE bool has66h() const noexcept { return (v & kPP_66) != 0; }
 
-  inline Opcode& addW() noexcept { return operator|=(kW); }
+  ASMJIT_INLINE Opcode& add(uint32_t x) noexcept { return operator+=(x); }
+
+  ASMJIT_INLINE Opcode& add66h() noexcept { return operator|=(kPP_66); }
   template<typename T>
-  inline Opcode& addWIf(T exp) noexcept { return operator|=(uint32_t(exp) << kW_Shift); }
+  ASMJIT_INLINE Opcode& add66hIf(T exp) noexcept { return operator|=(uint32_t(exp) << kPP_Shift); }
   template<typename T>
-  inline Opcode& addWBySize(T size) noexcept { return addWIf(size == 8); }
+  ASMJIT_INLINE Opcode& add66hBySize(T size) noexcept { return add66hIf(size == 2); }
+
+  ASMJIT_INLINE Opcode& addW() noexcept { return operator|=(kW); }
+  template<typename T>
+  ASMJIT_INLINE Opcode& addWIf(T exp) noexcept { return operator|=(uint32_t(exp) << kW_Shift); }
+  template<typename T>
+  ASMJIT_INLINE Opcode& addWBySize(T size) noexcept { return addWIf(size == 8); }
 
   template<typename T>
   ASMJIT_INLINE Opcode& addPrefixBySize(T size) noexcept {
@@ -408,29 +413,23 @@ struct Opcode {
     return (x | y) >> kMM_Shift;
   }
 
-  inline Opcode& operator =(uint32_t x) noexcept { v  = x; return *this; }
-  inline Opcode& operator+=(uint32_t x) noexcept { v += x; return *this; }
-  inline Opcode& operator-=(uint32_t x) noexcept { v -= x; return *this; }
-  inline Opcode& operator&=(uint32_t x) noexcept { v &= x; return *this; }
-  inline Opcode& operator|=(uint32_t x) noexcept { v |= x; return *this; }
-  inline Opcode& operator^=(uint32_t x) noexcept { v ^= x; return *this; }
+  ASMJIT_INLINE Opcode& operator=(uint32_t x) noexcept { v = x; return *this; }
+  ASMJIT_INLINE Opcode& operator+=(uint32_t x) noexcept { v += x; return *this; }
+  ASMJIT_INLINE Opcode& operator-=(uint32_t x) noexcept { v -= x; return *this; }
+  ASMJIT_INLINE Opcode& operator&=(uint32_t x) noexcept { v &= x; return *this; }
+  ASMJIT_INLINE Opcode& operator|=(uint32_t x) noexcept { v |= x; return *this; }
+  ASMJIT_INLINE Opcode& operator^=(uint32_t x) noexcept { v ^= x; return *this; }
 
-  inline uint32_t operator&(uint32_t x) const noexcept { return v & x; }
-  inline uint32_t operator|(uint32_t x) const noexcept { return v | x; }
-  inline uint32_t operator^(uint32_t x) const noexcept { return v ^ x; }
-  inline uint32_t operator<<(uint32_t x) const noexcept { return v << x; }
-  inline uint32_t operator>>(uint32_t x) const noexcept { return v >> x; }
-
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  uint32_t v;
+  ASMJIT_INLINE uint32_t operator&(uint32_t x) const noexcept { return v & x; }
+  ASMJIT_INLINE uint32_t operator|(uint32_t x) const noexcept { return v | x; }
+  ASMJIT_INLINE uint32_t operator^(uint32_t x) const noexcept { return v ^ x; }
+  ASMJIT_INLINE uint32_t operator<<(uint32_t x) const noexcept { return v << x; }
+  ASMJIT_INLINE uint32_t operator>>(uint32_t x) const noexcept { return v >> x; }
 };
 
 //! \}
+//! \endcond
 
 ASMJIT_END_SUB_NAMESPACE
 
-// [Guard]
 #endif // _ASMJIT_X86_X86OPCODE_P_H

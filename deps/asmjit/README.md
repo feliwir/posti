@@ -1,19 +1,21 @@
 AsmJit
 ------
 
-Complete x86/x64 JIT and Remote Assembler for C++.
+Complete x86/x64 JIT and AOT Assembler for C++.
 
   * [Official Repository (asmjit/asmjit)](https://github.com/asmjit/asmjit)
   * [Official Blog (asmbits)](https://asmbits.blogspot.com/ncr)
   * [Official Chat (gitter)](https://gitter.im/asmjit/asmjit)
   * [Permissive ZLIB license](./LICENSE.md)
 
+
 Introduction
 ------------
 
-AsmJit is a complete JIT and remote assembler for C++ language. It can generate native code for x86 and x64 architectures and supports the whole x86/x64 instruction set - from legacy MMX to the newest AVX512. It has a type-safe API that allows C++ compiler to do semantic checks at compile-time even before the assembled code is generated and/or executed.
+AsmJit is a complete JIT and AOT assembler for C++ language. It can generate native code for x86 and x64 architectures and supports the whole x86/x64 instruction set - from legacy MMX to the newest AVX512. It has a type-safe API that allows C++ compiler to do semantic checks at compile-time even before the assembled code is generated and/or executed.
 
 AsmJit, as the name implies, started as a project that provided JIT code-generation and execution. However, AsmJit evolved and it now contains features that are far beyond the scope of a simple JIT compilation. To keep the library small and lightweight the functionality not strictly related to JIT is provided by a sister project called [asmtk](https://github.com/asmjit/asmtk).
+
 
 Minimal Example
 ---------------
@@ -28,10 +30,10 @@ using namespace asmjit;
 typedef int (*Func)(void);
 
 int main(int argc, char* argv[]) {
-  JitRuntime jit;                         // Runtime specialized for JIT code execution.
+  JitRuntime rt;                          // Runtime specialized for JIT code execution.
 
   CodeHolder code;                        // Holds code and relocation information.
-  code.init(jit.codeInfo());              // Initialize to the same arch as JIT runtime.
+  code.init(rt.codeInfo());               // Initialize to the same arch as JIT runtime.
 
   x86::Assembler a(&code);                // Create and attach x86::Assembler to `code`.
   a.mov(x86::eax, 1);                     // Move one to 'eax' register.
@@ -39,7 +41,7 @@ int main(int argc, char* argv[]) {
   // ----> x86::Assembler is no longer needed from here and can be destroyed <----
 
   Func fn;
-  Error err = jit.add(&fn, &code);        // Add the generated code to the runtime.
+  Error err = rt.add(&fn, &code);         // Add the generated code to the runtime.
   if (err) return 1;                      // Handle a possible error returned by AsmJit.
   // ----> CodeHolder is no longer needed from here and can be destroyed <----
 
@@ -49,79 +51,89 @@ int main(int argc, char* argv[]) {
   // All classes use RAII, all resources will be released before `main()` returns,
   // the generated function can be, however, released explicitly if you intend to
   // reuse or keep the runtime alive, which you should in a production-ready code.
-  jit.release(fn);
+  rt.release(fn);
 
   return 0;
 }
 ```
 
+
 AsmJit Summary
 --------------
 
-  * Complete x86/x64 instruction set - MMX, SSEx, BMIx, ADX, TBM, XOP, AVXx, FMAx, and AVX512.
-  * Different emitters providing various abstraction levels (Assembler, BaseBuilder, BaseCompiler).
+  * Complete x86/x64 instruction set - MMX, SSE+, BMI+, ADX, TBM, XOP, AVX+, FMA+, and AVX512+.
+  * Different emitters providing various abstraction levels (Assembler, Builder, Compiler).
+  * Support for sections for separating code and data.
   * Built-in CPU vendor and features detection.
-  * Advanced logging/formatting and robust error handling.
+  * Advanced logging, formatting, and error handling.
   * JIT memory allocator - interface similar to malloc/free for JIT code-generation and execution.
-  * Lightweight and easily embeddable - 200-250kB compiled with all built-in features.
-  * Modular - unneeded features can be disabled at compile-time to make the library even smaller.
+  * Lightweight and easily embeddable - ~300kB compiled with all built-in features.
+  * Modular design - unneeded features can be disabled at compile-time to make the library smaller.
   * Zero dependencies - no external libraries, no STL/RTTI - easy to embed and/or link statically.
   * Doesn't use exceptions internally, but allows to attach a "throwable" error handler of your choice.
+
 
 Advanced Features
 -----------------
 
   * AsmJit contains a highly compressed instruction database:
     * Instruction names - allows to convert instruction id to its name and vice versa.
-    * Instruction metadata - access (read|write|rw) of all operand combinations of all instructions.
+    * Instruction metadata - access (read|write) of all operand combinations of all instructions.
     * Instruction signatures - allows to strictly validate if an instruction (with all its operands) is valid.
   * AsmJit allows to precisely control how instructions are encoded if there are multiple variations.
   * AsmJit is highly dynamic, constructing operands at runtime is a common practice.
-  * Multiple emitters with the same interface - emit machine code directly or to a representation that can be processed afterwards.
+  * Multiple emitters with the same interface - emit machine code directly or to a representation that can be post-processed.
+
 
 Important
 ---------
 
 Breaking the official API is sometimes inevitable, what to do?
   * See asmjit tests, they always compile and provide an implementation of a lot of use-cases:
-    * [asmjit_test_x86_asm.cpp](./test/asmjit_test_x86_asm.cpp) - Tests that use all emitters.
-    * [asmjit_test_x86_cc.cpp](./test/asmjit_test_x86_cc.cpp) - Tests that use **x86::Compiler**.
+    * [asmjit_test_x86_asm.cpp](./test/asmjit_test_x86_asm.cpp) - Tests that demonstrate the purpose of emitters.
+    * [asmjit_test_x86_cc.cpp](./test/asmjit_test_x86_cc.cpp) - A lot of tests targeting Compiler infrastructure.
+    * [asmjit_test_x86_sections.cpp](./test/asmjit_test_x86_sections.cpp) - Multiple sections test.
   * Visit our [Official Chat](https://gitter.im/asmjit/asmjit) if you need a quick help.
 
-TODOs:
-  * [ ] Add support for user external buffers.
-  * [ ] AsmJit added support for code sections, but only the first section (executable code) works atm.
+
+TODO
+----
+
+  * [ ] Add support for user external buffers in CodeHolder.
+
 
 Supported Environments
 ----------------------
 
 ### C++ Compilers:
 
-  * Features:
-    * AsmJit won't build without C++11 enabled. If you use older GCC and Clang you would have to enable at least c++11 through compiler flags.
+  * Requirements:
+    * AsmJit won't build without C++11 enabled. If you use older GCC or Clang you would have to enable at least c++11 through compiler flags.
   * Tested:
     * **Clang** - tested by Travis-CI - Clang 3.9+ (with C++11 enabled) is officially supported (older Clang versions having C++11 support are probably fine, but are not regularly tested).
     * **GNU** - tested by Travis-CI - GCC 4.8+ (with C++11 enabled) is officially supported.
-    * **MINGW** - tested by AppVeyor - Use the latest version if possible.
-    * **MSVC** - tested by AppVeyor - **MSVC2017+ only!** - there is a severe bug in MSVC2015's `constexpr` implementation that makes that compiler unusable.
+    * **MINGW** - tested by Travis-CI - Use the latest version, if possible.
+    * **MSVC** - tested by Travis-CI - **MSVC2017+ only!** - there is a severe bug in MSVC2015's `constexpr` implementation that makes that compiler unusable.
   * Untested:
-    * **Intel** - no maintainers, no CI environment to regularly test this compiler.
+    * **Intel** - no maintainers and no CI environment to regularly test this compiler.
     * Other c++ compilers would require basic support in [core/build.h](./src/asmjit/core/build.h).
 
 ### Operating Systems:
 
   * Tested:
     * **Linux** - tested by Travis-CI - any distribution is generally supported.
-    * **Mac** - tested by Travis-CI - any version is supported.
-    * **Windows** - tested by AppVeyor - Windows 7+ is officially supported although Windows XP should work as well.
+    * **OSX** - tested by Travis-CI - any version is supported.
+    * **Windows** - tested by Travis-CI - Windows 7+ is officially supported.
   * Untested:
-    * **BSDs** - no maintainers, no CI environment to regularly test this OS.
-    * Other operating systems would require some testing and support in [core/build.h](./src/asmjit/core/build.h) and [core/osutils.cpp](./src/asmjit/core/osutils.cpp).
+    * **BSDs** - no maintainers, no CI environment to regularly test these OSes.
+    * **Haiku** - not regularly tested, but reported to work.
+    * Other operating systems would require some testing and support in [core/build.h](./src/asmjit/core/build.h), [core/osutils.cpp](./src/asmjit/core/osutils.cpp), and [core/virtmem.cpp](./src/asmjit/core/virtmem.cpp).
 
 ### Backends:
 
-  * **X86** - tested by both Travis-CI and AppVeyor - both 32-bit and 64-bit backends are fully functional.
+  * **X86** - tested by both Travis-CI - both 32-bit and 64-bit backends are fully functional.
   * **ARM** - work-in-progress (not public at the moment).
+
 
 Project Organization
 --------------------
@@ -129,16 +141,17 @@ Project Organization
   * **`/`**        - Project root.
     * **src**      - Source code.
       * **asmjit** - Source code and headers (always point include path in here).
-        * **core** - Core API, backend independent.
-        * **arm**  - ARM specific API, used only by ARM32 and ARM64 backends.
+        * **core** - Core API, backend independent except relocations.
+        * **arm**  - ARM specific API, used only by ARM and AArch64 backends.
         * **x86**  - X86 specific API, used only by X86 and X64 backends.
     * **test**     - Unit and integration tests (don't embed in your project).
     * **tools**    - Tools used for configuring, documenting and generating data files.
 
+
 Configuring & Feature Selection
 -------------------------------
 
-AsmJit is designed to be easy embeddable in any project. However, it depends on some compile-time macros that can be used to build a specific version of AsmJit that includes or excludes certain features. A typical way of building AsmJit is to use [cmake](https://www.cmake.org), but it's also possible to just include AsmJit source code in your project and just build it. The easiest way to include AsmJit in your project is to just include **src** directory in your project and to define `ASMJIT_BUILD_STATIC` or `ASMJIT_BUILD_EMBED`. AsmJit can be just updated from time to time without any changes to this integration process. Do not embed AsmJit's [/test](./test) files in such case as these are used for testing.
+AsmJit is designed to be easy embeddable in any project. However, it depends on some compile-time macros that can be used to build a specific version of AsmJit that includes or excludes certain features. A typical way of building AsmJit is to use [cmake](https://www.cmake.org), but it's also possible to just include AsmJit source code in your project and just build it. The easiest way to include AsmJit in your project is to just include **src** directory in your project and to define `ASMJIT_STATIC`. AsmJit can be just updated from time to time without any changes to this integration process. Do not embed AsmJit's [/test](./test) files in such case as these are used for testing.
 
 ### Build Type:
 
@@ -149,10 +162,9 @@ By default none of these is defined, AsmJit detects build-type based on compile-
 
 ### Build Mode:
 
-  * `ASMJIT_BUILD_EMBED` - Define to embed AsmJit in another project. Embedding means that neither shared nor static library is created and AsmJit's source files and source files of the product that embeds AsmJit are part of the same target. This way of building AsmJit has certain advantages that are beyond this manual. `ASMJIT_BUILD_EMBED` behaves similarly to `ASMJIT_BUILD_STATIC` (no API exports).
-  * `ASMJIT_BUILD_STATIC` - Define to build AsmJit as a static library. No symbols are exported in such case.
+  * `ASMJIT_STATIC` - Define to build AsmJit statically - either as a static library or as a part of another project. No symbols are exported in such case.
 
-By default AsmJit build is configured to be built as a shared library, thus none of `ASMJIT_BUILD_EMBED` and `ASMJIT_BUILD_STATIC` is defined.
+By default AsmJit build is configured to be built as a shared library, this means `ASMJIT_STATIC` must be explicitly enabled if you want to compile AsmJit statically.
 
 ### Build Backends:
 
@@ -164,14 +176,15 @@ If none of `ASMJIT_BUILD_...` is defined AsmJit bails to `ASMJIT_BUILD_HOST`, wh
 
 ### Disabling Features:
 
-  * `ASMJIT_DISABLE_BUILDER` - Disables both `BaseBuilder` and `BaseCompiler` emitters (only `Assembler` will be available). Ideal for users that don't use `BaseBuilder` concept and want to have AsmJit a bit smaller.
-  * `ASMJIT_DISABLE_COMPILER` - Disables `BaseCompiler` emitter. For users that use `BaseBuilder`, but not `BaseCompiler`.
-  * `ASMJIT_DISABLE_JIT` - Disables JIT execution engine, which includes `JitUtils`, `JitAllocator`, and `JitRuntime`.
-  * `ASMJIT_DISABLE_LOGGING` - Disables logging (`Logger` and all classes that inherit it) and instruction formatting.
-  * `ASMJIT_DISABLE_TEXT` - Disables everything that uses text-representation and that causes certain strings to be stored in the resulting binary. For example when this flag is enabled all instruction and error names (and related APIs) will not be available. This flag has to be disabled together with `ASMJIT_DISABLE_LOGGING`. This option is suitable for deployment builds or builds that don't want to reveal the use of AsmJit.
-  * `ASMJIT_DISABLE_INST_API` - Disables strict validation, read/write information, and all additional data and APIs that can output information about instructions.
+  * `ASMJIT_NO_BUILDER` - Disables both `Builder` and `Compiler` emitters (only `Assembler` will be available). Ideal for users that don't use `Builder` concept and want to have AsmJit a bit smaller.
+  * `ASMJIT_NO_COMPILER` - Disables `Compiler` emitter. For users that use `Builder`, but not `Compiler`.
+  * `ASMJIT_NO_JIT` - Disables JIT execution engine, which includes `JitUtils`, `JitAllocator`, and `JitRuntime`.
+  * `ASMJIT_NO_LOGGING` - Disables logging (`Logger` and all classes that inherit it) and instruction formatting.
+  * `ASMJIT_NO_TEXT` - Disables everything that uses text-representation and that causes certain strings to be stored in the resulting binary. For example when this flag is set all instruction and error names (and related APIs) will not be available. This flag has to be disabled together with `ASMJIT_NO_LOGGING`. This option is suitable for deployment builds or builds that don't want to reveal the use of AsmJit.
+  * `ASMJIT_NO_INST_API` - Disables instruction query features, strict validation, read/write information, and all additional data and APIs that can output information about instructions.
 
 NOTE: Please don't disable any features if you plan to build AsmJit as a shared library that will be used by multiple projects that you don't control (for example asmjit in a Linux distribution). The possibility to disable certain features exists mainly for customized builds of AsmJit.
+
 
 Using AsmJit
 ------------
@@ -183,7 +196,7 @@ AsmJit library uses one global namespace called `asmjit` that provides the whole
 AsmJit provides two classes that are used together for code generation:
 
   * `CodeHolder` - Provides functionality to hold generated code and stores all necessary information about code sections, labels, symbols, and possible relocations.
-  * `[Base]Emitter` - Provides functionality to emit code into `CodeHolder`. `BaseEmitter` is abstract and provides just basic building blocks that are then implemented by `BaseAssembler`, `BaseBuilder`, `BaseCompiler`, and their architecture-specific implementations like `x86::Assembler`, `x86::Builder`, and `x86::Compiler`.
+  * `BaseEmitter` - Provides functionality to emit code into `CodeHolder`. `BaseEmitter` is abstract and provides just basic building blocks that are then implemented by `BaseAssembler`, `BaseBuilder`, `BaseCompiler`, and their architecture-specific implementations like `x86::Assembler`, `x86::Builder`, and `x86::Compiler`.
 
 Code emitters:
 
@@ -191,11 +204,9 @@ Code emitters:
   * `[Base]Builder` - Emitter designed to emit code into a representation that can be processed afterwards. It stores the whole code in a double linked list consisting of nodes (`BaseNode` and all derived classes). There are nodes that represent instructions (`InstNode`), labels (`LabelNode`), and other building blocks (`AlignNode`, `DataNode`, ...). Some nodes are used as markers (`SentinelNode` and comments (`CommentNode`).
   * `[Base]Compiler` - High-level code emitter that uses virtual registers and contains high-level function building features. Compiler extends `[Base]Builder` functionality and introduces new nodes like `FuncNode`, `FuncRetNode`, and `FuncCallNode`. Compiler is the simplest way to start with AsmJit as it abstracts lots of details required to generate a function that can be called from a C/C++ language.
 
-### Runtime
+### Targets and JitRuntime
 
-AsmJit's `Runtime` is designed for execution and/or linking. The `Runtime` itself is abstract and defines only how to `add()` and `release()` code held by `CodeHolder`. `CodeHolder` holds machine code and relocation entries, but should be seen as a temporary object only - after the code in `CodeHolder` is ready, it should be passed to `Runtime` or relocated manually. Users interested in inspecting the generated machine-code (instead of executing or linking) can keep it in `CodeHodler` and process it manually of course.
-
-The only `Runtime` implementation provided directly by AsmJit is called `JitRuntime`, which is suitable for storing and executing dynamically generated code. `JitRuntime` is used in most AsmJit examples as it makes the code management easy. It allows to add and release dynamically generated functions easily, so it's suitable for JIT code generators that want to keep many functions alive, and possibly release functions which are no longer needed.
+AsmJit's `Target` class is an interface that provides basic target abstraction. At the moment only one implementation called `JitRuntime` is provided, which as the name suggests provides JIT code target and execution runtime. `JitRuntime` provides all the necessary functionality to implement a simple JIT functionality with basic memory management. It only provides `add()` and `release()` functions that are used to either add code to the runtime or release it. The `JitRuntime` doesn't do any decisions on when the code should be released. Once you add new code into it you must decide when that code is no longer needed and should be released.
 
 ### Instructions & Operands
 
@@ -227,6 +238,8 @@ AsmJit allows to construct operands dynamically, to store them, and to query a c
 Small example of manipulating and using operands:
 
 ```c++
+#include <asmjit/asmjit.h>
+
 using namespace asmjit;
 
 x86::Gp dstRegByValue() { return x86::ecx; }
@@ -272,20 +285,19 @@ Some operands have to be created explicitly by `BaseEmitter`. For example labels
 The example handles 3 calling conventions manually just to show how it could be done, however, AsmJit contains utilities that can be used to create function prologs and epilogs automatically, but these concepts will be explained later.
 
 ```c++
+#include <asmjit/asmjit.h>
+#include <stdio.h>
+
 using namespace asmjit;
 
 // Signature of the generated function.
 typedef int (*SumFunc)(const int* arr, size_t count);
 
 int main(int argc, char* argv[]) {
-  assert(sizeof(void*) == 8 &&
-    "This example requires 64-bit environment.");
-
   JitRuntime jit;                         // Create a runtime specialized for JIT.
-
   CodeHolder code;                        // Create a CodeHolder.
-  code.init(jit.codeInfo());              // Initialize it to be compatible with `jit`.
 
+  code.init(jit.codeInfo());              // Initialize it to be compatible with `jit`.
   x86::Assembler a(&code);                // Create and attach x86::Assembler to `code`.
 
   // Decide between 32-bit CDECL, WIN64, and SysV64 calling conventions:
@@ -296,9 +308,13 @@ int main(int argc, char* argv[]) {
   x86::Gp sum = x86::eax;                 // Use EAX as 'sum' as it's a return register.
 
   if (ASMJIT_ARCH_BITS == 64) {
-    bool isWinOS = static_cast<bool>(ASMJIT_OS_WINDOWS);
-    arr = isWinOS ? x86::rcx : x86::rdi;  // First argument (array ptr).
-    cnt = isWinOS ? x86::rdx : x86::rsi;  // Second argument (number of elements)
+  #if defined(_WIN32)
+    arr = x86::rcx;                       // First argument (array ptr).
+    cnt = x86::rdx;                       // Second argument (number of elements)
+  #else
+    arr = x86::rdi;                       // First argument (array ptr).
+    cnt = x86::rsi;                       // Second argument (number of elements)
+  #endif
   }
   else {
     arr = x86::edx;                       // Use EDX to hold the array pointer.
@@ -347,6 +363,8 @@ The example should be self-explanatory. It shows how to work with labels, how to
 X86 provides a complex memory addressing model that allows to encode addresses having a BASE register, INDEX register with a possible scale (left shift), and displacement (called offset in AsmJit). Memory address can also specify memory segment (segment-override in X86 terminology) and some instructions (gather / scatter) require INDEX to be a VECTOR register instead of a general-purpose register. AsmJit allows to encode and work with all forms of addresses mentioned and implemented by X86. It also allows to construct a 64-bit memory address, which is only allowed in one form of 'mov' instruction.
 
 ```c++
+#include <asmjit/asmjit.h>
+
 // Memory operand construction is provided by x86 namespace.
 using namespace asmjit;
 using namespace asmjit::x86;              // Easier to access x86 regs.
@@ -355,7 +373,7 @@ using namespace asmjit::x86;              // Easier to access x86 regs.
 x86::Mem a = ptr(rax);                    // a = [rax]
 x86::Mem b = ptr(rax, 15)                 // b = [rax + 15]
 
-// BASE + INDEX + SCALE - Scale is in BITS as used by X86!
+// BASE + INDEX << SHIFT - Shift is in BITS as used by X86!
 x86::Mem c = ptr(rax, rbx)                // c = [rax + rbx]
 x86::Mem d = ptr(rax, rbx, 2)             // d = [rax + rbx << 2]
 x86::Mem e = ptr(rax, rbx, 2, 15)         // e = [rax + rbx << 2 + 15]
@@ -412,6 +430,8 @@ mem.hasIndex();                           // true.
 Making changes to memory operand is very comfortable when emitting loads and stores:
 
 ```c++
+#include <asmjit/asmjit.h>
+
 using namespace asmjit;
 
 x86::Assembler a(...);                    // Your initialized x86::Assembler.
@@ -445,6 +465,9 @@ You can explore the possibilities by taking a look at:
 In the first complete example the `CodeInfo` is retrieved from `JitRuntime`. It's logical as `JitRuntime` will always return a `CodeInfo` that is compatible with the runtime environment. For example if your application runs in 64-bit mode the `CodeInfo` will use `ArchInfo::kIdX64` architecture in contrast to `ArchInfo::kIdX86`, which will be used in 32-bit mode. AsmJit also allows to setup `CodeInfo` manually, and to select a different architecture when needed. So let's do something else this time, let's always generate a 32-bit code and print it's binary representation. To do that, we create our own `CodeInfo` and initialize it to `ArchInfo::kIdX86` architecture. CodeInfo will populate all basic fields just based on the architecture we provide, so it's super-easy:
 
 ```c++
+#include <asmjit/asmjit.h>
+#include <stdio.h>
+
 using namespace asmjit;
 
 int main(int argc, char* argv[]) {
@@ -468,11 +491,12 @@ int main(int argc, char* argv[]) {
   a.ret();                                // Return from function.
 
   // We have no Runtime this time, it's on us what we do with the code.
-  // CodeHolder stores code in SectionEntry, which embeds CodeSection
-  // and CodeBuffer structures. We are interested in section's CodeBuffer only.
+  // CodeHolder stores code in `Section`, which provides some basic properties
+  // and CodeBuffer structure. We are interested in section's CodeBuffer only.
   //
   // NOTE: The first section is always '.text', so it's safe to just use 0 index.
-  CodeBuffer& buffer = code.sectionEntry(0)->buffer();
+  // Get it by using either `code.sectionById(0)` or `code.textSection()`.
+  CodeBuffer& buffer = code.sectionById(0)->buffer();
 
   // Print the machine-code generated or do something more interesting with it?
   //   8B4424048B4C24048B5424040F28010F58010F2900C3
@@ -485,26 +509,32 @@ int main(int argc, char* argv[]) {
 
 ### Explicit Code Relocation
 
-CodeInfo contains much more information than just the target architecture. It can be configured to specify a base-address (or a virtual base-address in a linker terminology), which could be static (useful when you know the location of the target's machine code) or dynamic. AsmJit assumes dynamic base-address by default and relocates the code held by `CodeHolder` to a user-provided address on-demand. To be able to relocate to a user-provided address it needs to store some information about relocations, which is represented by `CodeHolder::RelocEntry`. Relocation entries are only required if you call external functions from the generated code that cannot be encoded by using a 32-bit displacement (X64 architecture doesn't provide 64-bit encodable displacement) and when a label referenced in one section is bound in another, but this is not really a JIT case and it's more related to AOT (ahead-of-time) compilation.
+CodeInfo contains much more information than just the target architecture. It can be configured to specify a base-address (or a virtual base-address in a linker terminology), which could be static (useful when you know the location of the target's machine code) or dynamic. AsmJit assumes dynamic base-address by default and relocates the code held by `CodeHolder` to a user-provided address on-demand. To be able to relocate to a user-provided address it needs to store some information about relocations, which is represented by `RelocEntry`. Relocation entries are only required if you call external functions from the generated code that cannot be encoded by using a 32-bit displacement (X64 architecture doesn't provide an encodable 64-bit displacement).
 
-Next example shows how to use a built-in virtual memory allocator `JitAllocator` instead of using `JitRuntime` (just in case you want to use your own memory management) and how to relocate the generated code into your own memory block - you can use your own virtual memory allocator if you prefer that, but that's OS specific and it's already provided by AsmJit, so we will use what AsmJit offers instead of going deep into OS APIs.
+There is also a concept called `LabelLink` - label links are lightweight structs that don't have any identifier and are stored per label in a single-linked list. Label links represent either unbound yet used labels (that are valid in cases in which label was not bound but was already referenced by an instruction) and links that cross-sections (only relevant to code that uses multiple sections). Since crossing sections is something that cannot be resolved immediately these links persist until offsets of these sections are assigned and `CodeHolder::resolveUnresolvedLinks()` is called. It's an error if you end up with code that has unresolved label links after flattening. You can verify it by calling `CodeHolder::hasUnresolvedLinks()` and `CodeHolder::unresolvedLinkCount()`.
+
+AsmJit can flatten code that uses multiple sections by assigning each section an incrementing offset that respects its alignment. Use `CodeHolder::flatten()` to do that. After the sections are flattened their offsets and virtual-sizes were adjusted to respect section's buffer size and alignment. You must call `CodeHolder::resolveUnresolvedLinks()` before relocating the code held by it. You can also flatten your code manually by iterating over all sections and calculating their offsets (relative to base) by your own algorithm. In that case you don't have to call `CodeHolder::flatten()`, but you must still call `CodeHolder::resolveUnresolvedLinks()`.
+
+Next example shows how to use a built-in virtual memory allocator `JitAllocator` instead of using `JitRuntime` (just in case you want to use your own memory management) and how to relocate the generated code into your own memory block - you can use your own virtual memory allocator if you prefer that, but that's OS specific and it's already provided by AsmJit, so we will use what AsmJit offers instead of going deep into OS specific APIs.
 
 The following code is similar to the previous one, but implements a function working in both 32-bit and 64-bit environments:
 
 ```c++
+#include <asmjit/asmjit.h>
+#include <stdio.h>
+
 using namespace asmjit;
 
 typedef void (*SumIntsFunc)(int* dst, const int* a, const int* b);
 
 int main(int argc, char* argv[]) {
   CodeHolder code;                        // Create a CodeHolder.
-  code.init(CodeInfo(ArchInfo::kIdHost));// Initialize it for the host architecture.
+  code.init(CodeInfo(ArchInfo::kIdHost)); // Initialize it for the host architecture.
 
   x86::Assembler a(&code);                // Create and attach x86::Assembler to `code`.
 
   // Generate a function runnable in both 32-bit and 64-bit architectures:
   bool isX86 = ASMJIT_ARCH_X86 == 32;
-  bool isWin = ASMJIT_OS_WINDOWS != 0;
 
   // Signature: 'void func(int* dst, const int* a, const int* b)'.
   x86::Gp dst;
@@ -517,14 +547,20 @@ int main(int argc, char* argv[]) {
     dst   = x86::eax;
     src_a = x86::ecx;
     src_b = x86::edx;
-    a.mov(dst  , dword_ptr(x86::esp, 4)); // Load the destination pointer.
-    a.mov(src_a, dword_ptr(x86::esp, 8)); // Load the first source pointer.
-    a.mov(src_b, dword_ptr(x86::esp, 12));// Load the second source pointer.
+    a.mov(dst  , x86::dword_ptr(x86::esp, 4));  // Load the destination pointer.
+    a.mov(src_a, x86::dword_ptr(x86::esp, 8));  // Load the first source pointer.
+    a.mov(src_b, x86::dword_ptr(x86::esp, 12)); // Load the second source pointer.
   }
   else {
-    dst   = isWin ? x86::rcx : x86::rdi;  // First argument  (destination pointer).
-    src_a = isWin ? x86::rdx : x86::rsi;  // Second argument (source 'a' pointer).
-    src_b = isWin ? x86::r8  : x86::rdx;  // Third argument  (source 'b' pointer).
+  #if defined(_WIN32)
+    dst   = x86::rcx;                     // First argument  (destination pointer).
+    src_a = x86::rdx;                     // Second argument (source 'a' pointer).
+    src_b = x86::r8;                      // Third argument  (source 'b' pointer).
+  #else
+    dst   = x86::rdi;                     // First argument  (destination pointer).
+    src_a = x86::rsi;                     // Second argument (source 'a' pointer).
+    src_b = x86::rdx;                     // Third argument  (source 'b' pointer).
+  #endif
   }
 
   a.movdqu(x86::xmm0, x86::ptr(src_a));   // Load 4 ints from [src_a] to XMM0.
@@ -533,22 +569,54 @@ int main(int argc, char* argv[]) {
   a.movdqu(x86::ptr(dst), x86::xmm0);     // Store the result to [dst].
   a.ret();                                // Return from function.
 
+  // Even when we didn't use multiple sections AsmJit could insert one section
+  // called '.addrtab' (address table section), which would be filled by data
+  // required by relocations (absolute jumps and calls). You can omit this code
+  // if you are 100% sure your code doesn't contain multiple sections and
+  // such relocations. You can use `CodeHolder::hasAddressTable()` to verify
+  // whether the address table section does exist.
+  code.flatten();
+  code.resolveUnresolvedLinks();
+
   // After the code was generated it can be relocated manually to any memory
   // location, however, we need to know it's size before we perform memory
-  // allocation. CodeHolder's `codeSize()` returns the worst estimated
-  // code-size (the biggest possible) in case that relocations are not
-  // possible without trampolines (in that case some extra code at the end
-  // of the current code buffer is generated during relocation).
-  size_t size = code.codeSize();
+  // allocation. `CodeHolder::codeSize()` returns the worst estimated code
+  // size in case that relocations are not possible without trampolines (in
+  // that case some extra code at the end of the current code buffer is
+  // generated during relocation).
+  size_t estimatedSize = code.codeSize();
 
-  // Instead of rolling our own virtual memory allocator we can use the one
-  // AsmJit uses. It's decoupled so you don't need to use Runtime for that.
+  // Instead of rolling up our own memory allocator we can use the one AsmJit
+  // provides. It's decoupled so you don't need to use `JitRuntime` for that.
   JitAllocator allocator;
 
-  void* p = allocator.alloc(size);        // Allocate a virtual memory (executable).
-  if (!p) return 0;                       // Handle a possible out-of-memory case.
+  // Allocate an executable virtual memory and handle a possible failure.
+  void* p = allocator.alloc(estimatedSize);
+  if (!p) return 0;
 
-  size_t realSize = code.relocate(p);     // Relocate & store the output in 'p'.
+  // Now relocate the code to the address provided by the memory allocator.
+  // Please note that this DOESN'T COPY anything to `p`. This function will
+  // store the address in CodeInfo and use relocation entries to patch the
+  // existing code in all sections to respect the base address provided.
+  code.relocateToBase((uint64_t)p);
+
+  // This is purely optional. There are cases in which the relocation can
+  // omit unneeded data, which would shrink the size of address table. If
+  // that happened the `codeSize` returned after `relocateToBase()` would
+  // be smaller than the originally `estimatedSize`.
+  size_t codeSize = code.codeSize();
+
+  // This will copy code from all sections to `p`. Iterating over all
+  // sections and calling `memcpy()` would work as well, however, this
+  // function supports additional options that can be used to also zero
+  // pad sections' virtual size, etc.
+  //
+  // With some additional features, copyFlattenData() does roughly this:
+  //   for (Section* section : code.sections())
+  //     memcpy((uint8_t*)p + section->offset(),
+  //            section->data(),
+  //            section->bufferSize());
+  code.copyFlattenedData(p, codeSize, CodeHolder::kCopyWithPadding);
 
   // Execute the generated function.
   int inA[4] = { 4, 3, 2, 1 };
@@ -556,7 +624,7 @@ int main(int argc, char* argv[]) {
   int out[4];
 
   // This code uses AsmJit's ptr_as_func<> to cast between void* and SumIntsFunc.
-  ptr_as_func<SumIntsFunc>(p)(result, arr_a, arr_b);
+  ptr_as_func<SumIntsFunc>(p)(out, inA, inB);
 
   // Prints {5 8 4 9}
   printf("{%d %d %d %d}\n", out[0], out[1], out[2], out[3]);
@@ -570,38 +638,35 @@ int main(int argc, char* argv[]) {
 }
 ```
 
-Configure the CodeInfo by calling `CodeInfo::setBaseAddress()` to initialize it to a user-provided base-address before passing it to `CodeHolder`:
+If you know your base-address in advance (before code generation) you can use `CodeInfo::setBaseAddress()` to setup its initial value. In that case Assembler will know the absolute position of each instruction and would be able to use it during instruction encoding and prevent relocations in case the instruction is encodable. The following example shows how to configure the base address:
 
 ```c++
-// Configure CodeInfo.
+// Configure CodeInfo with base address.
 CodeInfo ci(...);
 ci.setBaseAddress(uint64_t(0x1234));
 
 // Then initialize CodeHolder with it.
 CodeHolder code;
 code.init(ci);
-
-// ... after you emit the machine code it will be relocated to the base address
-//     provided and stored in the pointer passed to `CodeHolder::relocate()`.
 ```
-
-TODO: Maybe `CodeHolder::relocate()` is not the best name?
 
 ### Using Native Registers - zax, zbx, zcx, ...
 
 AsmJit's X86 code emitters always provide functions to construct machine-size registers depending on the target. This feature is for people that want to write code targeting both 32-bit and 64-bit at the same time. In AsmJit terminology these registers are named **zax**, **zcx**, **zdx**, **zbx**, **zsp**, **zbp**, **zsi**, and **zdi** (they are defined in this exact order by X86). They are accessible through `x86::Assembler`, `x86::Builder`, and `x86::Compiler`. The following example illustrates how to use this feature:
 
 ```c++
+#include <asmjit/asmjit.h>
+#include <stdio.h>
+
 using namespace asmjit;
 
 typedef int (*Func)(void);
 
 int main(int argc, char* argv[]) {
   JitRuntime jit;                         // Create a runtime specialized for JIT.
-
   CodeHolder code;                        // Create a CodeHolder.
-  code.init(jit.codeInfo());              // Initialize it to be compatible with `jit`.
 
+  code.init(jit.codeInfo());              // Initialize it to be compatible with `jit`.
   x86::Assembler a(&code);                // Create and attach x86::Assembler to `code`.
 
   // Let's get these registers from x86::Assembler.
@@ -671,16 +736,18 @@ To illustrate what short form and long form means in binary let's assume we want
 If you generate an instruction in a short form and then patch it in a long form or vice-versa then something really bad will happen when you try to execute such code. The following example illustrates how to patch the code properly (it just extends the previous example):
 
 ```c++
+#include <asmjit/asmjit.h>
+#include <stdio.h>
+
 using namespace asmjit;
 
 typedef int (*Func)(void);
 
 int main(int argc, char* argv[]) {
   JitRuntime jit;                         // Create a runtime specialized for JIT.
-
   CodeHolder code;                        // Create a CodeHolder.
-  code.init(jit.codeInfo());              // Initialize it to be compatible with `jit`.
 
+  code.init(jit.codeInfo());              // Initialize it to be compatible with `jit`.
   x86::Assembler a(&code);                // Create and attach x86::Assembler to `code`.
 
   // Let's get these registers from x86::Assembler.
@@ -737,20 +804,20 @@ AsmJit contains another instruction option that controls (forces) REX prefix - `
   * `4083C410` - `rex add esp, 16` - 32-bit operation in 64-bit mode with forced REX prefix (0x40).
   * `4883C410` - `add rsp, 16`     - 64-bit operation in 64-bit mode requires REX prefix (0x48).
   * `4183C410` - `add r12d, 16`    - 32-bit operation in 64-bit mode using R12D requires REX prefix (0x41).
-  * `4983C410` - `add r12, 16`     - 64-bit operation in 64-bit mode using R12  requires REX prefix (0x49).
+  * `4983C410` - `add r12, 16`     - 64-bit operation in 64-bit mode using R12 requires REX prefix (0x49).
 
 ### Generic Function API
 
 So far all examples shown above handled creating function prologs and epilogs manually. While it's possible to do it that way it's much better to automate such process as function calling conventions vary across architectures and also across operating systems.
 
-AsmJit contains a functionality that can be used to define function signatures and to calculate automatically optimal function frame that can be used directly by a prolog and epilog inserter. This feature was exclusive to AsmJit's BaseCompiler for a very long time, but was abstracted out and is now available for all users regardless of BaseEmitter they use. The design of handling functions prologs and epilogs allows generally two use cases:
+AsmJit contains a functionality that can be used to define function signatures and to calculate automatically optimal function frame that can be used directly by a prolog and epilog inserter. This feature was exclusive to AsmJit's Compiler for a very long time, but was abstracted out and is now available for all users regardless of BaseEmitter they use. The design of handling functions prologs and epilogs allows generally two use cases:
 
   * Calculate function frame before the function is generated - this is the only way if you use pure `Assembler` emitter and shown in the next example.
-  * Calculate function frame after the function is generated - this way is generally used by `BaseBuilder` and `BaseCompiler` (will be described together with `x86::Compiler`).
+  * Calculate function frame after the function is generated - this way is generally used by `Builder` and `Compiler` emitters(will be described together with `x86::Compiler`).
 
 The following concepts are used to describe and create functions in AsmJit:
 
-  * `Type` - Type is an 8-bit value that describes a platform independent type as we know it from C/C++. It provides abstractions for most common types like `int8_t`, `uint32_t`, `uintptr_t`, `float`, `double`, and all possible vector types to match ISAs up to AVX512. `Type::Id` was introduced originally to be used with `BaseCompiler`, but is now used by `FuncSignature` as well.
+  * `Type` - Type is an 8-bit value that describes a platform independent type as we know from C/C++. It provides abstractions for most common types like `int8_t`, `uint32_t`, `uintptr_t`, `float`, `double`, and all possible vector types to match ISAs up to AVX512. `Type::Id` was introduced originally to be used with the Compiler infrastucture, but is now used by `FuncSignature` as well.
 
   * `CallConv` - Describes a calling convention - this class contains instructions to assign registers and stack addresses to function arguments and return value(s), but doesn't specify any function signature. Calling conventions are architecture and OS dependent.
 
@@ -765,14 +832,17 @@ The following concepts are used to describe and create functions in AsmJit:
 It's a lot of concepts where each represents one step in the function frame calculation. In addition, the whole machinery can also be used to create function calls, instead of function prologs and epilogs. The next example shows how AsmJit can be used to create functions for both 32-bit and 64-bit targets and various calling conventions:
 
 ```c++
+#include <asmjit/asmjit.h>
+#include <stdio.h>
+
 using namespace asmjit;
 
 typedef void (*SumIntsFunc)(int* dst, const int* a, const int* b);
 
 int main(int argc, char* argv[]) {
   JitRuntime jit;                         // Create JIT Runtime.
-
   CodeHolder code;                        // Create a CodeHolder.
+
   code.init(jit.codeInfo());              // Initialize it to match `jit`.
   x86::Assembler a(&code);                // Create and attach x86::Assembler to `code`.
 
@@ -788,13 +858,17 @@ int main(int argc, char* argv[]) {
 
   // Create and initialize `FuncDetail` and `FuncFrame`.
   FuncDetail func;
-  func.init(FuncSignature3<void, int*, const int*, const int*>(CallConv::kIdHost));
+  func.init(FuncSignatureT<void, int*, const int*, const int*>(CallConv::kIdHost));
 
   FuncFrame frame;
   frame.init(func);
 
   // Make XMM0 and XMM1 dirty; `kGroupVec` describes XMM|YMM|ZMM registers.
   frame.setDirtyRegs(x86::Reg::kGroupVec, IntUtils::mask(0, 1));
+
+  // Alternatively, if you don't want to use register masks you can pass `BaseReg`
+  // to `addDirtyRegs()`. The following code would add both `xmm0` and `xmm1`.
+  frame.addDirtyRegs(x86::xmm0, x86::xmm1);
 
   FuncArgsAssignment args(&func);         // Create arguments assignment context.
   args.assignAll(dst, src_a, src_b);      // Assign our registers to arguments.
@@ -827,23 +901,24 @@ int main(int argc, char* argv[]) {
 }
 ```
 
-BaseBuilder
------------
 
-Both `[Base]Builder` and `[Base]Compiler` are emitters that emit everything to a representation that allows further processing. The code stored in such representation is completely safe to be patched, simplified, reordered, obfuscated, removed, injected, analyzed, and 'think-of-anything-else'. Each instruction, label, directive, etc... is stored in `BaseNode` (or derived class like `InstNode` or `LabelNode`) and contains all the information relevant to it.
+Builder Interface
+-----------------
 
-There is a difference between `[Base]Builder` and `[Base]Compiler`:
+Both `Builder` and `Compiler` are emitters that emit everything to a representation that allows further processing. The code stored in such representation is completely safe to be patched, simplified, reordered, obfuscated, removed, injected, analyzed, and 'think-of-anything-else'. Each instruction, label, directive, etc... is stored in `BaseNode` (or derived class like `InstNode` or `LabelNode`) and contains all the information required to pass it later to the `Assembler`.
 
-  * `BaseBuilder` (low-level):
-    * Maximum compatibility with `Assembler`, easy to switch from `Assembler` to `BaseBuilder` and vice versa.
+There is a huge difference between `Builder` and `Compiler`:
+
+  * `Builder` (low-level):
+    * Maximum compatibility with `Assembler`, easy to switch from `Assembler` to `Builder` and vice versa.
     * Doesn't generate machine code directly, allows to serialize to `Assembler` when the whole code is ready to be encoded.
 
-  * `BaseCompiler` (high-level):
+  * `Compiler` (high-level):
     * Virtual registers - allows to use unlimited number of virtual registers which are allocated into physical registers by a built-in register allocator.
     * Function nodes - allows to create functions by specifying their signatures and assigning virtual registers to function arguments and return value(s).
     * Function calls - allows to call other functions within the generated code by using the same interface that is used to create functions.
 
-There are multiple node types used by both `BaseBuilder` and `BaseCompiler`:
+There are multiple node types used by both `Builder` and `Compiler`:
 
   * Basic nodes:
     * `BaseNode` - Base class for all nodes.
@@ -860,18 +935,21 @@ There are multiple node types used by both `BaseBuilder` and `BaseCompiler`:
     * `CommentNode` - Contains a comment string, doesn't affect code generation.
     * `SentinelNode` - A marker that can be used to remember certain position, doesn't affect code generation.
 
-  * `BaseCompiler` nodes:
+  * Compiler-only nodes:
     * `FuncNode` - Start of a function.
     * `FuncRetNode` - Return from a function.
     * `FuncCallNode` - Function call.
 
-### Using BaseBuilder
+### Using Builder
 
-`BaseBuilder` was designed to be used as an `Assembler` replacement in case that post-processing of the generated code is required. The code can be modified during or after code generation. The post processing can be done manually or through `Pass` (Code-Builder Pass) object. `BaseBuilder` stores the emitted code as a double-linked list, which allows O(1) insertion and removal.
+The Builder interface was designed to be used as an `Assembler` replacement in case that post-processing of the generated code is required. The code can be modified during or after code generation. The post processing can be done manually or through `Pass` (Code-Builder Pass) object. Builder stores the emitted code as a double-linked list, which allows O(1) insertion and removal.
 
-The code representation used by `BaseBuilder` is compatible with everything AsmJit provides. Each instruction is stored as `InstNode`, which contains instruction id, options, and operands. Each instruction emitted will create a new `InstNode` instance and add it to the current cursor in the double-linked list of nodes. Since the instruction stream used by `BaseBuilder` can be manipulated, we can rewrite the **SumInts** example into the following:
+The code representation used by `Builder` is compatible with everything AsmJit provides. Each instruction is stored as `InstNode`, which contains instruction id, options, and operands. Each instruction emitted will create a new `InstNode` instance and add it to the current cursor in the double-linked list of nodes. Since the instruction stream used by `Builder` can be manipulated, we can rewrite the **SumInts** example into the following:
 
 ```c++
+#include <asmjit/asmjit.h>
+#include <stdio.h>
+
 using namespace asmjit;
 
 typedef void (*SumIntsFunc)(int* dst, const int* a, const int* b);
@@ -885,8 +963,8 @@ static void dumpCode(BaseBuilder& cb, const char* phase) {
 
 int main(int argc, char* argv[]) {
   JitRuntime jit;                         // Create JIT Runtime.
-
   CodeHolder code;                        // Create a CodeHolder.
+
   code.init(jit.codeInfo());              // Initialize it to match `jit`.
   x86::Builder cb(&code);                 // Create and attach x86::Builder to `code`.
 
@@ -902,7 +980,7 @@ int main(int argc, char* argv[]) {
 
   // Create and initialize `FuncDetail`.
   FuncDetail func;
-  func.init(FuncSignature3<void, int*, const int*, const int*>(CallConv::kIdHost));
+  func.init(FuncSignatureT<void, int*, const int*, const int*>(CallConv::kIdHost));
 
   // Remember prolog insertion point.
   BaseNode* prologInsertionPoint = cb.cursor();
@@ -944,8 +1022,8 @@ int main(int argc, char* argv[]) {
   // Let's see how the function's prolog and epilog looks.
   dumpCode(cb, "Prolog & Epilog");
 
-  // IMPORTANT: BaseBuilder requires `finalize()` to be called to serialize
-  // the code to the Assembler (it automatically creates one if not attached).
+  // IMPORTANT: Builder requires `finalize()` to be called to serialize the code
+  // to the Assembler (it automatically creates one if not attached).
   cb.finalize();
 
   SumIntsFunc fn;
@@ -990,6 +1068,8 @@ ret
 The number of use-cases of **x86::Builder** is not limited and highly depends on your creativity and experience. The previous example can be easily improved to collect all dirty registers inside the function programmatically and to pass them to `frame.setDirtyRegs()`:
 
 ```c++
+#include <asmjit/asmjit.h>
+
 using namespace asmjit;
 
 // NOTE: This function doesn't cover all possible constructs. It ignores
@@ -1029,7 +1109,7 @@ static void setDirtyRegsOfFuncFrame(const x86::Builder& cb, FuncFrame& frame) {
 
 ### Using x86::Assembler or x86::Builder through X86::Emitter
 
-Even when **Assembler** and **BaseBuilder** implement the same interface defined by **BaseEmitter** their platform dependent variants (**x86::Assembler** and **x86::Builder**, respective) cannot be interchanged or casted to each other by using C++'s `static_cast<>`. The main reason is the inheritance graph of these classes is different and cast-incompatible, as illustrated in the following graph:
+Even when **Assembler** and **Builder** provide the same interface as defined by **BaseEmitter** their platform dependent variants (**x86::Assembler** and **x86::Builder**, respective) cannot be interchanged or casted to each other by using C++'s `static_cast<>`. The main reason is the inheritance graph of these classes is different and cast-incompatible, as illustrated in the following graph:
 
 ```
                                             +--------------+      +=========================+
@@ -1057,6 +1137,8 @@ The graph basically shows that it's not possible to cast `x86::Assembler` to `x8
 Each X86 emitter implements a member function called `as<x86::Emitter>()`, which casts the instance to the `x86::Emitter`, as illustrated on the next example:
 
 ```c++
+#include <asmjit/asmjit.h>
+
 using namespace asmjit;
 
 static void emitSomething(x86::Emitter* e) {
@@ -1072,8 +1154,8 @@ static void assemble(CodeHolder& code, bool useAsm) {
     x86::Builder cb(&code);
     emitSomething(cb.as<x86::Emitter>());
 
-    // IMPORTANT: BaseBuilder requires `finalize()` to be called to serialize
-    // the code to the Assembler (it automatically creates one if not attached).
+    // IMPORTANT: Builder requires `finalize()` to be called to serialize the
+    // code to the Assembler (it automatically creates one if not attached).
     cb.finalize();
   }
 }
@@ -1081,16 +1163,17 @@ static void assemble(CodeHolder& code, bool useAsm) {
 
 The example above shows how to create a function that can emit code to either **x86::Assembler** or **x86::Builder** through **x86::Emitter**, which provides emitter-neutral functionality. **x86::Emitter**, however, doesn't provide any emitter **x86::Assembler** or **x86::Builder** specific functionality like **setCursor()**.
 
-BaseCompiler
-------------
 
-**BaseCompiler** is a high-level code emitter that provides virtual registers and automatically handles function calling conventions. It's still architecture dependent, but makes the code generation much easier by offering a built-in register allocator and function builder. Functions are essential; the first-step to generate some code is to define the signature of the function you want to generate (before generating the function body). Function arguments and return value(s) are handled by assigning virtual registers to them. Similarly, function calls are handled the same way.
+Compiler Interface
+------------------
 
-**BaseCompiler** also makes the use of passes (introduced by **BaseBuilder**) and automatically adds an architecture-dependent register allocator pass to the list of passes when attached to **CodeHolder**.
+**Compiler** is a high-level code emitter that provides virtual registers and automatically handles function calling conventions. It's still architecture dependent, but makes the code generation much easier by offering a built-in register allocator and function builder. Functions are essential; the first-step to generate some code is to define the signature of the function you want to generate (before generating the function body). Function arguments and return value(s) are handled by assigning virtual registers to them. Similarly, function calls are handled the same way.
+
+**Compiler** also makes the use of passes (introduced by **Builder**) and automatically adds an architecture-dependent register allocator pass to the list of passes when attached to **CodeHolder**.
 
 ### Compiler Basics
 
-The first **BaseCompiler** example shows how to generate a function that simply returns an integer value. It's an analogy to the very first example:
+The first **Compiler** example shows how to generate a function that simply returns an integer value. It's an analogy to the very first example:
 
 ```c++
 #include <asmjit/asmjit.h>
@@ -1103,12 +1186,12 @@ typedef int (*Func)(void);
 
 int main(int argc, char* argv[]) {
   JitRuntime jit;                         // Runtime specialized for JIT code execution.
-
   CodeHolder code;                        // Holds code and relocation information.
-  code.init(jit.codeInfo());              // Initialize to the same arch as JIT runtime.
 
+  code.init(jit.codeInfo());              // Initialize to the same arch as JIT runtime.
   x86::Compiler cc(&code);                // Create and attach x86::Compiler to `code`.
-  cc.addFunc(FuncSignature0<int>());      // Begin a function of `int fn(void)` signature.
+
+  cc.addFunc(FuncSignatureT<int>());      // Begin a function of `int fn(void)` signature.
 
   x86::Gp vReg = cc.newGpd();             // Create a 32-bit general purpose register.
   cc.mov(vReg, 1);                        // Move one to our virtual register `vReg`.
@@ -1144,13 +1227,13 @@ typedef void (*MemCpy32)(uint32_t* dst, const uint32_t* src, size_t count);
 
 int main(int argc, char* argv[]) {
   JitRuntime jit;                         // Runtime specialized for JIT code execution.
-
   CodeHolder code;                        // Holds code and relocation information.
-  code.init(jit.codeInfo());              // Initialize to the same arch as JIT runtime.
 
+  code.init(jit.codeInfo());              // Initialize to the same arch as JIT runtime.
   x86::Compiler cc(&code);                // Create and attach x86::Compiler to `code`.
+
   cc.addFunc(                             // Begin the function of the following signature:
-    FuncSignature3<void,                  //   Return value - void      (no return value).
+    FuncSignatureT<void,                  //   Return value - void      (no return value).
       uint32_t*,                          //   1st argument - uint32_t* (machine reg-size).
       const uint32_t*,                    //   2nd argument - uint32_t* (machine reg-size).
       size_t>());                         //   3rd argument - size_t    (machine reg-size).
@@ -1193,12 +1276,12 @@ int main(int argc, char* argv[]) {
   // ----> CodeHolder is no longer needed from here and can be destroyed <----
 
   // Test the generated code.
-  uint32_t src[6] = { 1, 2, 3, 5, 8, 13 };
-  uint32_t dst[6];
-  memcpy32(dst, src, 6);
+  uint32_t input[6] = { 1, 2, 3, 5, 8, 13 };
+  uint32_t output[6];
+  memcpy32(output, input, 6);
 
   for (uint32_t i = 0; i < 6; i++)
-    printf("%d\n", dst[i]);
+    printf("%d\n", output[i]);
 
   jit.release(memcpy32);                  // RAII, but let's make it explicit.
   return 0;
@@ -1220,13 +1303,13 @@ typedef uint32_t (*Fibonacci)(uint32_t x);
 
 int main(int argc, char* argv[]) {
   JitRuntime jit;                         // Runtime specialized for JIT code execution.
-
   CodeHolder code;                        // Holds code and relocation information.
-  code.init(jit.codeInfo());              // Initialize to the same arch as JIT runtime.
 
+  code.init(jit.codeInfo());              // Initialize to the same arch as JIT runtime.
   x86::Compiler cc(&code);                // Create and attach x86::Compiler to `code`.
+
   FuncNode* func = cc.addFunc(            // Begin of the Fibonacci function, `addFunc()`
-    FuncSignature1<int, int>());          // Returns a pointer to the `FuncNode` node.
+    FuncSignatureT<int, int>());          // Returns a pointer to the `FuncNode` node.
 
   Label L_Exit = cc.newLabel()            // Exit label.
   x86::Gp x = cc.newU32();                // Function `x` argument.
@@ -1242,7 +1325,7 @@ int main(int argc, char* argv[]) {
 
   FuncCallNode* call = cc.call(           // Function call:
     func->label(),                        //   Function address or Label.
-    FuncSignature1<int, int>());          //   Function signature.
+    FuncSignatureT<int, int>());          //   Function signature.
 
   call->setArg(0, x);                     // Assign `x` as the first argument and
   call->setRet(0, x);                     // assign `x` as a return value as well.
@@ -1261,7 +1344,7 @@ int main(int argc, char* argv[]) {
   if (err) return 1;                      // Handle a possible error returned by AsmJit.
   // ----> CodeHolder is no longer needed from here and can be destroyed <----
 
-  printf("Fib(%u) -> %u\n, 8, fib(8));    // Test the generated code.
+  printf("Fib(%u) -> %u\n", 8, fib(8));   // Test the generated code.
 
   jit.release(fib);                       // RAII, but let's make it explicit.
   return 0;
@@ -1270,7 +1353,7 @@ int main(int argc, char* argv[]) {
 
 ### Stack Management
 
-**BaseCompiler** manages function's stack-frame, which is used by the register allocator to spill virtual registers. It also provides an interface to allocate user-defined block of the stack, which can be used as a temporary storage by the generated function. In the following example a stack of 256 bytes size is allocated, filled by bytes starting from 0 to 255 and then iterated again to sum all the values.
+**Compiler** manages function's stack-frame, which is used by the register allocator to spill virtual registers. It also provides an interface to allocate user-defined block of the stack, which can be used as a temporary storage by the generated function. In the following example a stack of 256 bytes size is allocated, filled by bytes starting from 0 to 255 and then iterated again to sum all the values.
 
 ```c++
 #include <asmjit/asmjit.h>
@@ -1283,12 +1366,12 @@ typedef int (*Func)(void);
 
 int main(int argc, char* argv[]) {
   JitRuntime jit;                         // Runtime specialized for JIT code execution.
-
   CodeHolder code;                        // Holds code and relocation information.
-  code.init(jit.codeInfo());              // Initialize to the same arch as JIT runtime.
 
+  code.init(jit.codeInfo());              // Initialize to the same arch as JIT runtime.
   x86::Compiler cc(&code);                // Create and attach x86::Compiler to `code`.
-  cc.addFunc(FuncSignature0<int>());      // Create a function that returns 'int'.
+
+  cc.addFunc(FuncSignatureT<int>());      // Create a function that returns 'int'.
 
   x86::Gp p = cc.newIntPtr("p");
   x86::Gp i = cc.newIntPtr("i");
@@ -1352,7 +1435,7 @@ int main(int argc, char* argv[]) {
 
 ### Constant Pool
 
-**BaseCompiler** provides two constant pools for a general purpose code generation - local and global. Local constant pool is related to a single **FuncNode** node and is generally flushed after the function body, and global constant pool is flushed at the end of the generated code by **BaseCompiler::finalize()**.
+**Compiler** provides two constant pools for a general purpose code generation - local and global. Local constant pool is related to a single **FuncNode** node and is generally flushed after the function body, and global constant pool is flushed at the end of the generated code by **Compiler::finalize()**.
 
 ```c++
 #include <asmjit/asmjit.h>
@@ -1360,7 +1443,7 @@ int main(int argc, char* argv[]) {
 using namespace asmjit;
 
 static void exampleUseOfConstPool(x86::Compiler& cc) {
-  cc.addFunc(FuncSignature0<int>());
+  cc.addFunc(FuncSignatureT<int>());
 
   x86::Gp v0 = cc.newGpd("v0");
   x86::Gp v1 = cc.newGpd("v1");
@@ -1376,6 +1459,7 @@ static void exampleUseOfConstPool(x86::Compiler& cc) {
   cc.endFunc();
 }
 ```
+
 
 Advanced Features
 -----------------
@@ -1573,8 +1657,8 @@ int main(int argc, char* argv[]) {
 
   x86::Assembler a(&code);
 
-  // Try to emit instruction that doesn't exist.
   if (!setjmp(eh.state)) {
+    // Try to emit instruction that doesn't exist.
     a.emit(x86::Inst::kIdMov, x86::xmm0, x86::xmm1);
   }
   else {
@@ -1588,7 +1672,7 @@ int main(int argc, char* argv[]) {
 
 ### Code Injection
 
-`BaseBuilder` and `BaseCompiler` emitters store their nodes in a double-linked list, which makes it easy to manipulate during the code generation or after it. Each node is always emitted next to the current `cursor` and the cursor is changed to that newly emitted node. Cursor can be explicitly retrieved and assigned by `cursor()` and `setCursor()`, respectively.
+Both `Builder` and `Compiler` emitters store their nodes in a double-linked list, which makes it easy to manipulate that list during the code generation or after. Each node is always emitted next to the current `cursor` and the cursor is changed to that newly emitted node. The cursor can be explicitly retrieved and changed by `cursor()` and `setCursor()`, respectively.
 
 The following example shows how to inject code at the beginning of the function by implementing an `XmmConstInjector` helper class.
 
@@ -1599,16 +1683,188 @@ The following example shows how to inject code at the beginning of the function 
 
 ...More documentation...
 
+
+
+Other Topics
+------------
+
+This section provides quick answers to some recurring questions and topics.
+
+### Instruction Validation
+
+AsmJit by default prefers performance when it comes to instruction encoding. The Assembler implementation would only validate operands that must be validated to select a proper encoding of the instruction. This means that by default it would accept instructions that do not really exist like `mov rax, ebx`. This is great in release mode as it makes the assembler faster, however, it's not that great for development as it allows to silently pass even when the instruction's operands are incorrect. To fix this Asmjit contains a feature called **Strict Validation**, which allows to validate each instruction before the Assembler tries to encode it. This feature can also be used without an Assembler instance through `BaseInst::validate()` API.
+
+Emitter options are configured through CodeHolder:
+
+```c++
+CodeHolder code;
+
+// Enables strict instruction validation for all emitters attached to `code`.
+code.addEmitterOptions(BaseEmitter::kOptionStrictValidation);
+
+// Use either ErrorHandler attached to CodeHolder or Error code returned by
+// the Assembler.
+x86::Assembler a(&code);
+Error err = a.emit(x86::Inst::kIdMov, x86::eax, x86::al);
+if (err) { /* failed */ }
+```
+
+### Label Offsets and Links
+
+When you use a label that is not yet bound the Assembler would create a `LabelLink`, which is then added to CodeHolder's `LabelEntry`. These links are also created for labels that are bound but reference some location in a different section. Firstly, here are some functions that can be used to check some basics:
+
+```c++
+CodeHolder code = ...;
+Label L = ...;
+
+// Returns whether the Label `L` is bound.
+bool bound = code.isLabelBound(L or L.id());
+
+// Returns true if the code contains either referenced, but unbound labels,
+// or cross-section label links that are not resolved yet.
+bool value = code.hasUnresolvedLinks();     // Boolean answer.
+size_t count = code.unresolvedLinkCount();  // Count of links.
+```
+
+Please note that there is not API to return a count of unbound labels as this is completely unimportant from CodeHolder's perspective. If a label is not used then it doesn't matter whether it's bound or not, only used labels matter. After a Label is bound you can query it's offset relative to the start of the section where it was bound:
+
+```c++
+CodeHolder code = ...;
+Label L = ...;
+
+// After you are done you can check the offset. The offset provided
+// is relative to the start of the section, see below for alternative.
+// If the given label is not bound then the offset returned will be zero.
+uint64_t offset = code.labelOffset(L or L.id());
+
+// If you use multiple sections and want the offset relative to the base.
+// NOTE: This function expects that the section has already an offset and
+// the label-link was resolved (if this is not true you will still get an
+// offset relative to the start of the section).
+uint64_t offset = code.labelOffsetFromBase(L or L.id());
+```
+
+### Sections
+
+Sections is a relatively new feature that allows to create multiple sections. It's supported by Assembler, Builder, and Compiler. Please note that using multiple sections is advanced and requires more understanding about how AsmJit works. There is a test-case [asmjit_test_x86_sections.cpp](./test/asmjit_test_x86_sections.cpp) that shows how sections can be used.
+
+```c++
+CodeHolder code = ...;
+
+// Text section is always provided as the first section.
+Section* text = code.textSection(); // or code.sectionById(0);
+
+// To create another section use `code.newSection()`.
+Section* data;
+Error err = code.newSection(&data,
+  ".data",  // Section name
+  SIZE_MAX, // Name length if the name is not null terminated (or SIZE_MAX).
+  0,        // Section flags, see Section::Flags.
+  8);       // Section alignment, must be power of 2.
+
+// When you switch sections in Assembler, Builder, or Compiler the cursor
+// will always move to the end of that section. When you create an Assembler
+// the cursor would be placed at the end of the first (.text) section, which
+// is initially empty.
+x86::Assembler a(&code);
+Label L_Data = a.newLabel();
+
+a.mov(x86::eax, x86::ebx); // Emits in .text section.
+
+a.section(data);           // Switches to the end of .data section.
+a.bind(L_Data);            // Binds label in this .data section
+a.db(0x01);                // Emits byte in .data section.
+
+a.section(text);           // Switches to the end of .text section.
+a.add(x86::ebx, x86::eax); // Emits in .text section.
+
+// References a label bound in .data section in .text section. This
+// would create a LabelLink even when the L_Data is already bound,
+// because the reference crosses sections. See below...
+a.lea(x86::rsi, x86::ptr(L_Data));
+```
+
+The last line in the example above shows that a LabelLink would be created even for bound labels that cross sections. In this case a referenced label was bound in another section, which means that the link couldn't be resolved at that moment. If your code uses sections, but you wish AsmJit to flatten these sections (you don't plan to flatten then manually) then there is an API for that.
+
+```c++
+// ... (continuing the previous example) ...
+CodeHolder code = ...;
+
+// Suppose we have some code that contains multiple sections and
+// we would like to flatten it by using AsmJit's built-in API:
+Error err = code.flatten();
+if (err) { /* Error handling is necessary. */ }
+
+// After flattening all sections would contain assigned offsets
+// relative to base. Offsets are 64-bit unsigned integers so we
+// cast it to `unsigned int` for simplicity here...
+printf("Data section offset %u", unsigned(data->offset()));
+
+// The flattening doesn't resolve unresolved label links, this
+// has to be done manually as flattening can be done separately.
+err = code.resolveUnresolvedLinks();
+if (err) { /* Error handling is necessary. */ }
+
+if (code.hasUnresolvedLinks()) {
+  // This would mean either unbound label or some other issue.
+  printf("FAILED: UnresoledLinkCount=%zu\n", code.unresovedLinkCount());
+}
+```
+
+### Using AsmJit Data Structures
+
+AsmJit stores its data in data structures allocated by `ZoneAllocator`. It's a fast allocator that allows AsmJit to allocate a lot of small data structures fast and without `malloc()` overhead. The most common data structure that you will probably inspect is `ZoneVector<T>`. It's like C++'s `std::vector`. but the implementation doesn't use exceptions and uses the mentioned `ZoneAllocator` for performance reasons. You don't have to worry about allocations as you should not need to add items to data structures that are managed by `CodeHolder` or advanced emitters like Builder/Compiler.
+
+APIs that return `ZoneVector`:
+
+```c++
+CodeHolder code = ...;
+
+// Contains all emitters attached to CodeHolder.
+const ZoneVector<BaseEmitter*>& emitters = code.emitters();
+
+// Contains all sections managed by CodeHolder.
+const ZoneVector<Section*>& sections = code.sections();
+
+// Contains all LabelEntry records associated with created Labels.
+const ZoneVector<LabelEntry*>& labelEntries = code.labelEntries();
+
+// Contains all RelocEntry records that describe relocations.
+const ZoneVector<RelocEntry*>& relocEntries = code.relocEntries();
+```
+
+AsmJit's `ZoneVector<T>` has overloaded array access operator to make it possible accessing its elements through operator[]. Some standard functions like `empty()`, `size()`, and `data()` are provided as well. Vectors are also iterable through range-based for loop:
+
+```c++
+CodeHolder code = ...;
+
+for (LabelEntry* le : code.labelEntries()) {
+  printf("Label #%u {Bound=%s Offset=%llu}",
+    le->id(),
+    le->isBound() ? "true" : "false",
+    (unsigned long long)le->offset());
+}
+```
+
+
 Support
 -------
 
-Please consider a donation if you use the project and would like to keep it active in the future.
+AsmJit is an open-source library released under a permissive ZLIB license, which makes it possible to use it freely in any open-source or commercial product. Free support is available through issues and gitter channel, which is very active. Commercial support is currently individual and can be negotiated on demand. It includes consultation, priority bug fixing, review of code that uses AsmJit, porting code to the latest AsmJit, and implementation of new AsmJit features.
 
-  * [Donate by PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=QDRM6SRNG7378&lc=EN;&item_name=asmjit&currency_code=EUR)
+If you use AsmJit in a non-commercial project and would like to appreciate the library in the form of a donation you are welcome to support us. Donations are anonymous unless the donor lets us know otherwise. The order and format of listed donors is not guaranteed and may change in the future. Additionally, donations should be considered as an appreciation of past work and not used to gain special privileges in terms of future development. AsmJit authors reserve the right to remove a donor from the list in extreme cases of disruptive behavior against other community members. Diversity of opinions and constructive criticism will always be welcome in the AsmJit community.
+
+Donation Addresses:
+
+  * BTC: 14dEp5h8jYSxgXB9vcjE8eh78uweD76o7W
+  * ETH: 0xd4f0b9424cF31DF5a5359D029CF3A65c500a581E
+  * Please contact us if you would like to donate through a different channel or to use a different crypto-currency. Wire transfers and SEPA payments are both possible.
 
 Donors:
 
   * [ZehMatt](https://github.com/ZehMatt)
+
+
 
 Authors & Maintainers
 ---------------------

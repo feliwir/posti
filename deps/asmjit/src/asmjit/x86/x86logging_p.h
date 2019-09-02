@@ -1,24 +1,22 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_X86_X86LOGGING_P_H
 #define _ASMJIT_X86_X86LOGGING_P_H
 
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_LOGGING
+#ifndef ASMJIT_NO_LOGGING
 
-// [Dependencies]
 #include "../core/logging.h"
-#include "../core/stringbuilder.h"
+#include "../core/string.h"
 #include "../x86/x86globals.h"
 
 ASMJIT_BEGIN_SUB_NAMESPACE(x86)
 
-//! \addtogroup asmjit_x86_api
+//! \addtogroup asmjit_x86
 //! \{
 
 // ============================================================================
@@ -27,7 +25,7 @@ ASMJIT_BEGIN_SUB_NAMESPACE(x86)
 
 namespace LoggingInternal {
   Error formatRegister(
-    StringBuilder& sb,
+    String& sb,
     uint32_t flags,
     const BaseEmitter* emitter,
     uint32_t archId,
@@ -35,24 +33,23 @@ namespace LoggingInternal {
     uint32_t regId) noexcept;
 
   Error formatOperand(
-    StringBuilder& sb,
+    String& sb,
     uint32_t flags,
     const BaseEmitter* emitter,
     uint32_t archId,
     const Operand_& op) noexcept;
 
   Error formatInstruction(
-    StringBuilder& sb,
+    String& sb,
     uint32_t flags,
     const BaseEmitter* emitter,
     uint32_t archId,
-    const BaseInst& inst, const Operand_* operands, uint32_t count) noexcept;
+    const BaseInst& inst, const Operand_* operands, uint32_t opCount) noexcept;
 };
 
 //! \}
 
 ASMJIT_END_SUB_NAMESPACE
 
-// [Guard]
-#endif // !ASMJIT_DISABLE_LOGGING
+#endif // !ASMJIT_NO_LOGGING
 #endif // _ASMJIT_X86_X86LOGGING_P_H

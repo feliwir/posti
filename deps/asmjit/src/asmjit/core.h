@@ -1,14 +1,54 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_H
 #define _ASMJIT_CORE_H
 
-// [Dependencies]
+//! \defgroup asmjit_core Core
+//! \brief Core API.
+//!
+//! API that provides classes and functions not specific to any architecture.
+
+//! \defgroup asmjit_builder Builder
+//! \brief Builder API.
+//!
+//! Both Builder and Compiler are emitters that emit everything to a representation
+//! that allows further processing. The code stored in such representation is
+//! completely safe to be patched, simplified, reordered, obfuscated, removed,
+//! injected, analyzed, or processed some other way. Each instruction, label,
+//! directive, or other building block is stored as \ref BaseNode (or derived
+//! class like \ref InstNode or \ref LabelNode) and contains all the information
+//! necessary to pass that node later to the Assembler.
+
+//! \defgroup asmjit_compiler Compiler
+//! \brief Compiler API.
+//!
+//! Compiler tool is built on top of a \ref asmjit_builder API and adds register
+//! allocation and support for defining and calling functions into it. At the
+//! moment it's the easiest way to generate some code as most architecture and
+//! OS specific stuff is properly abstracted, however, abstractions also mean
+//! that not everything is possible with the Compiler.
+
+//! \defgroup asmjit_func Function
+//! \brief Function API.
+
+//! \defgroup asmjit_jit JIT
+//! \brief JIT API and Virtual Memory Management.
+
+//! \defgroup asmjit_zone Zone
+//! \brief Zone allocator and zone allocated containers.
+
+//! \defgroup asmjit_support Support
+//! \brief Support API.
+
+//! \cond INTERNAL
+//! \defgroup asmjit_ra RA
+//! \brief Register allocator internals.
+//! \endcond
+
 #include "./core/globals.h"
 
 #include "./core/arch.h"
@@ -26,16 +66,14 @@
 #include "./core/inst.h"
 #include "./core/jitallocator.h"
 #include "./core/jitruntime.h"
-#include "./core/jitutils.h"
 #include "./core/logging.h"
-#include "./core/memmgr.h"
 #include "./core/operand.h"
 #include "./core/osutils.h"
-#include "./core/stringbuilder.h"
-#include "./core/stringutils.h"
+#include "./core/string.h"
 #include "./core/support.h"
 #include "./core/target.h"
 #include "./core/type.h"
+#include "./core/virtmem.h"
 #include "./core/zone.h"
 #include "./core/zonehash.h"
 #include "./core/zonelist.h"
@@ -44,30 +82,4 @@
 #include "./core/zonestring.h"
 #include "./core/zonevector.h"
 
-// DEPRECATED:
-ASMJIT_BEGIN_NAMESPACE
-
-#ifndef ASMJIT_DISABLE_BUILDER
-typedef ASMJIT_DEPRECATED(BaseBuilder   CodeBuilder , "Use `BaseBuilder`");
-typedef ASMJIT_DEPRECATED(BaseNode      CBNode      , "Use `BaseNode`");
-typedef ASMJIT_DEPRECATED(InstNode      CBInst      , "Use `InstNode`");
-typedef ASMJIT_DEPRECATED(LabelNode     CBLabel     , "Use `LabelNode`");
-typedef ASMJIT_DEPRECATED(AlignNode     CBAlign     , "Use `AlignNode`");
-typedef ASMJIT_DEPRECATED(EmbedDataNode CBData      , "Use `EmbedDataNode`");
-typedef ASMJIT_DEPRECATED(LabelDataNode CBLabelData , "Use `LabelDataNode`");
-typedef ASMJIT_DEPRECATED(ConstPoolNode CBConstPool , "Use `ConstPoolNode`");
-typedef ASMJIT_DEPRECATED(CommentNode   CBComment   , "Use `CommentNode`");
-typedef ASMJIT_DEPRECATED(SentinelNode  CBSentinel  , "Use `SentinelNode`");
-typedef ASMJIT_DEPRECATED(Pass          CBPass      , "Use `Pass`");
-#endif
-
-#ifndef ASMJIT_DISABLE_COMPILER
-typedef ASMJIT_DEPRECATED(BaseCompiler  CodeCompiler, "Use `BaseCompiler`");
-typedef ASMJIT_DEPRECATED(FuncNode      CCFunc      , "Use `FuncNode`");
-typedef ASMJIT_DEPRECATED(FuncRetNode   CCFuncRet   , "Use `FuncRetNode`");
-typedef ASMJIT_DEPRECATED(FuncCallNode  CCFuncCall  , "Use `FuncCallNode`");
-#endif
-ASMJIT_END_NAMESPACE
-
-// [Guard]
 #endif // _ASMJIT_CORE_H

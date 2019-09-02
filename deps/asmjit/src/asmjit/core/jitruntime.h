@@ -1,15 +1,14 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_JITRUNTIME_H
 #define _ASMJIT_CORE_JITRUNTIME_H
 
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_JIT
+#ifndef ASMJIT_NO_JIT
 
 #include "../core/codeholder.h"
 #include "../core/jitallocator.h"
@@ -19,7 +18,7 @@ ASMJIT_BEGIN_NAMESPACE
 
 class CodeHolder;
 
-//! \addtogroup asmjit_core_jit
+//! \addtogroup asmjit_jit
 //! \{
 
 // ============================================================================
@@ -32,44 +31,52 @@ class ASMJIT_VIRTAPI JitRuntime : public Target {
 public:
   ASMJIT_NONCOPYABLE(JitRuntime)
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! Virtual memory allocator.
+  JitAllocator _allocator;
 
-  //! Create a `JitRuntime` instance.
-  ASMJIT_API JitRuntime() noexcept;
-  //! Destroy the `JitRuntime` instance.
+  //! \name Construction & Destruction
+  //! \{
+
+  //! Creates a `JitRuntime` instance.
+  explicit ASMJIT_API JitRuntime(const JitAllocator::CreateParams* params = nullptr) noexcept;
+  //! Destroys the `JitRuntime` instance.
   ASMJIT_API virtual ~JitRuntime() noexcept;
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  inline void reset(uint32_t resetPolicy = Globals::kResetSoft) noexcept {
+    _allocator.reset(resetPolicy);
+  }
 
-  //! Get `JitAllocator` of the runtime.
+  //! \}
+
+  //! \name Accessors
+  //! \{
+
+  //! Returns the associated `JitAllocator`.
   inline JitAllocator* allocator() const noexcept { return const_cast<JitAllocator*>(&_allocator); }
 
-  // --------------------------------------------------------------------------
-  // [Add / Release]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Utilities
+  //! \{
 
   // NOTE: To allow passing function pointers to `add()` and `release()` the
   // virtual methods are prefixed with `_` and called from templates instead.
 
-  //! Allocate a memory needed for a code stored in the `CodeHolder` and
-  //! relocate it to the target location.
+  //! Allocates memory needed for a code stored in the `CodeHolder` and relocates
+  //! the code to the pointer allocated.
   //!
-  //! The beginning of the memory allocated for the function is returned in
-  //! `dst`. If failed the `Error` code is returned and `dst` is set to null
+  //! The beginning of the memory allocated for the function is returned in `dst`.
+  //! If failed `Error` code is returned and `dst` is explicitly set to `nullptr`
   //! (this means that you don't have to set it to null before calling `add()`).
   template<typename Func>
   inline Error add(Func* dst, CodeHolder* code) noexcept {
-    return _add(AsmJitInternal::ptr_cast<void**, Func*>(dst), code);
+    return _add(Support::ptr_cast_impl<void**, Func*>(dst), code);
   }
 
-  //! Release `p` which was obtained by calling `add()`.
+  //! Releases `p` which was obtained by calling `add()`.
   template<typename Func>
   inline Error release(Func p) noexcept {
-    return _release(AsmJitInternal::ptr_cast<void*, Func>(p));
+    return _release(Support::ptr_cast_impl<void*, Func>(p));
   }
 
   //! Type-unsafe version of `add()`.
@@ -78,7 +85,7 @@ public:
   //! Type-unsafe version of `release()`.
   ASMJIT_API virtual Error _release(void* p) noexcept;
 
-  //! Flush an instruction cache.
+  //! Flushes an instruction cache.
   //!
   //! This member function is called after the code has been copied to the
   //! destination buffer. It is only useful for JIT code generation as it
@@ -91,12 +98,7 @@ public:
   //! such as Valgrind, however, it's not an official part of AsmJit.
   ASMJIT_API virtual void flush(const void* p, size_t size) noexcept;
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  //! Virtual memory allocator.
-  JitAllocator _allocator;
+  //! \}
 };
 
 //! \}

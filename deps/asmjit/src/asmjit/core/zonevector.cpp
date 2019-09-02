@@ -1,13 +1,11 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
 #include "../core/support.h"
 #include "../core/zone.h"
 #include "../core/zonevector.h"
@@ -19,12 +17,12 @@ ASMJIT_BEGIN_NAMESPACE
 // ============================================================================
 
 Error ZoneVectorBase::_grow(ZoneAllocator* allocator, uint32_t sizeOfT, uint32_t n) noexcept {
-  uint32_t threshold = Globals::kAllocThreshold / sizeOfT;
+  uint32_t threshold = Globals::kGrowThreshold / sizeOfT;
   uint32_t capacity = _capacity;
   uint32_t after = _size;
 
   if (ASMJIT_UNLIKELY(std::numeric_limits<uint32_t>::max() - n < after))
-    return DebugUtils::errored(kErrorNoHeapMemory);
+    return DebugUtils::errored(kErrorOutOfMemory);
 
   after += n;
   if (capacity >= after)
@@ -61,17 +59,17 @@ Error ZoneVectorBase::_reserve(ZoneAllocator* allocator, uint32_t sizeOfT, uint3
 
   uint32_t nBytes = n * sizeOfT;
   if (ASMJIT_UNLIKELY(nBytes < n))
-    return DebugUtils::errored(kErrorNoHeapMemory);
+    return DebugUtils::errored(kErrorOutOfMemory);
 
   size_t allocatedBytes;
   uint8_t* newData = static_cast<uint8_t*>(allocator->alloc(nBytes, allocatedBytes));
 
   if (ASMJIT_UNLIKELY(!newData))
-    return DebugUtils::errored(kErrorNoHeapMemory);
+    return DebugUtils::errored(kErrorOutOfMemory);
 
   void* oldData = _data;
   if (_size)
-    std::memcpy(newData, oldData, size_t(_size) * sizeOfT);
+    memcpy(newData, oldData, size_t(_size) * sizeOfT);
 
   if (oldData)
     allocator->release(oldData, size_t(oldCapacity) * sizeOfT);
@@ -92,7 +90,7 @@ Error ZoneVectorBase::_resize(ZoneAllocator* allocator, uint32_t sizeOfT, uint32
   }
 
   if (size < n)
-    std::memset(static_cast<uint8_t*>(_data) + size_t(size) * sizeOfT, 0, size_t(n - size) * sizeOfT);
+    memset(static_cast<uint8_t*>(_data) + size_t(size) * sizeOfT, 0, size_t(n - size) * sizeOfT);
 
   _size = n;
   return kErrorOk;
@@ -115,7 +113,7 @@ Error ZoneBitVector::copyFrom(ZoneAllocator* allocator, const ZoneBitVector& oth
     // Realloc needed... Calculate the minimum capacity (in bytes) requied.
     uint32_t minimumCapacityInBits = Support::alignUp<uint32_t>(newSize, kBitWordSizeInBits);
     if (ASMJIT_UNLIKELY(minimumCapacityInBits < newSize))
-      return DebugUtils::errored(kErrorNoHeapMemory);
+      return DebugUtils::errored(kErrorOutOfMemory);
 
     // Normalize to bytes.
     uint32_t minimumCapacity = minimumCapacityInBits / 8;
@@ -123,7 +121,7 @@ Error ZoneBitVector::copyFrom(ZoneAllocator* allocator, const ZoneBitVector& oth
 
     BitWord* newData = static_cast<BitWord*>(allocator->alloc(minimumCapacity, allocatedCapacity));
     if (ASMJIT_UNLIKELY(!newData))
-      return DebugUtils::errored(kErrorNoHeapMemory);
+      return DebugUtils::errored(kErrorOutOfMemory);
 
     // `allocatedCapacity` now contains number in bytes, we need bits.
     size_t allocatedCapacityInBits = allocatedCapacity * 8;
@@ -176,7 +174,7 @@ Error ZoneBitVector::_resize(ZoneAllocator* allocator, uint32_t newSize, uint32_
     uint32_t minimumCapacityInBits = Support::alignUp<uint32_t>(idealCapacity, kBitWordSizeInBits);
 
     if (ASMJIT_UNLIKELY(minimumCapacityInBits < newSize))
-      return DebugUtils::errored(kErrorNoHeapMemory);
+      return DebugUtils::errored(kErrorOutOfMemory);
 
     // Normalize to bytes.
     uint32_t minimumCapacity = minimumCapacityInBits / 8;
@@ -184,7 +182,7 @@ Error ZoneBitVector::_resize(ZoneAllocator* allocator, uint32_t newSize, uint32_
 
     BitWord* newData = static_cast<BitWord*>(allocator->alloc(minimumCapacity, allocatedCapacity));
     if (ASMJIT_UNLIKELY(!newData))
-      return DebugUtils::errored(kErrorNoHeapMemory);
+      return DebugUtils::errored(kErrorOutOfMemory);
 
     // `allocatedCapacity` now contains number in bytes, we need bits.
     size_t allocatedCapacityInBits = allocatedCapacity * 8;
@@ -246,7 +244,7 @@ Error ZoneBitVector::_resize(ZoneAllocator* allocator, uint32_t newSize, uint32_
 }
 
 Error ZoneBitVector::_append(ZoneAllocator* allocator, bool value) noexcept {
-  uint32_t kThreshold = Globals::kAllocThreshold * 8;
+  uint32_t kThreshold = Globals::kGrowThreshold * 8;
   uint32_t newSize = _size + 1;
   uint32_t idealCapacity = _capacity;
 
@@ -259,7 +257,7 @@ Error ZoneBitVector::_append(ZoneAllocator* allocator, bool value) noexcept {
 
   if (ASMJIT_UNLIKELY(idealCapacity < _capacity)) {
     if (ASMJIT_UNLIKELY(_size == std::numeric_limits<uint32_t>::max()))
-      return DebugUtils::errored(kErrorNoHeapMemory);
+      return DebugUtils::errored(kErrorOutOfMemory);
     idealCapacity = newSize;
   }
 
@@ -270,7 +268,7 @@ Error ZoneBitVector::_append(ZoneAllocator* allocator, bool value) noexcept {
 // [asmjit::ZoneVector / ZoneBitVector - Unit]
 // ============================================================================
 
-#if defined(ASMJIT_BUILD_TEST)
+#if defined(ASMJIT_TEST)
 template<typename T>
 static void test_zone_vector(ZoneAllocator* allocator, const char* typeName) {
   int i;
@@ -348,7 +346,7 @@ static void test_zone_bitvector(ZoneAllocator* allocator) {
   }
 }
 
-UNIT(asmjit_core_zone_vector) {
+UNIT(asmjit_zone_vector) {
   Zone zone(8096 - Zone::kBlockOverhead);
   ZoneAllocator allocator(&zone);
 

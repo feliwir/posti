@@ -1,13 +1,11 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
 #include "../core/arch.h"
 #include "../core/func.h"
 #include "../core/type.h"
@@ -47,6 +45,7 @@ ASMJIT_FAVOR_SIZE Error FuncDetail::init(const FuncSignature& sign) {
     arg.initTypeId(Type::deabstract(args[i], deabstractDelta));
   }
   _argCount = uint8_t(argCount);
+  _vaIndex = uint8_t(sign.vaIndex());
 
   uint32_t ret = sign.ret();
   if (ret != Type::kIdVoid) {

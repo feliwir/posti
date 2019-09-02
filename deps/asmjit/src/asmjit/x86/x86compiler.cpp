@@ -1,17 +1,14 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Guard]
 #include "../core/build.h"
-#if defined(ASMJIT_BUILD_X86) && !defined(ASMJIT_DISABLE_COMPILER)
+#if defined(ASMJIT_BUILD_X86) && !defined(ASMJIT_NO_COMPILER)
 
-// [Dependencies]
 #include "../x86/x86assembler.h"
 #include "../x86/x86compiler.h"
 #include "../x86/x86rapass_p.h"
@@ -33,18 +30,10 @@ Compiler::~Compiler() noexcept {}
 // ============================================================================
 
 Error Compiler::finalize() {
-  // Flush the global constant pool.
-  if (_globalConstPool) {
-    addNode(_globalConstPool);
-    _globalConstPool = nullptr;
-  }
-
   ASMJIT_PROPAGATE(runPasses());
-
   Assembler a(_code);
   return serialize(&a);
 }
-
 // ============================================================================
 // [asmjit::x86::Compiler - Events]
 // ============================================================================
@@ -54,14 +43,18 @@ Error Compiler::onAttach(CodeHolder* code) noexcept {
   if (!ArchInfo::isX86Family(archId))
     return DebugUtils::errored(kErrorInvalidArch);
 
-  ASMJIT_PROPAGATE(_passes.willGrow(&_allocator));
   ASMJIT_PROPAGATE(Base::onAttach(code));
-
   _gpRegInfo.setSignature(archId == ArchInfo::kIdX86 ? uint32_t(Gpd::kSignature) : uint32_t(Gpq::kSignature));
-  return addPassT<X86RAPass>();
+
+  Error err = addPassT<X86RAPass>();
+  if (ASMJIT_UNLIKELY(err)) {
+    onDetach(code);
+    return err;
+  }
+
+  return kErrorOk;
 }
 
 ASMJIT_END_SUB_NAMESPACE
 
-// [Guard]
-#endif // ASMJIT_BUILD_X86 && !ASMJIT_DISABLE_COMPILER
+#endif // ASMJIT_BUILD_X86 && !ASMJIT_NO_COMPILER

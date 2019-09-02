@@ -1,17 +1,15 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Dependencies]
 #include "../core/assembler.h"
+#include "../core/codebufferwriter_p.h"
 #include "../core/constpool.h"
 #include "../core/logging.h"
-#include "../core/memmgr.h"
 #include "../core/support.h"
 
 ASMJIT_BEGIN_NAMESPACE
@@ -38,7 +36,7 @@ Error BaseAssembler::setOffset(size_t offset) {
   if (ASMJIT_UNLIKELY(!_code))
     return DebugUtils::errored(kErrorNotInitialized);
 
-  size_t size = std::max<size_t>(_section->buffer().size(), this->offset());
+  size_t size = Support::max<size_t>(_section->bufferSize(), this->offset());
   if (ASMJIT_UNLIKELY(offset > size))
     return reportError(DebugUtils::errored(kErrorInvalidArgument));
 
@@ -50,11 +48,11 @@ Error BaseAssembler::setOffset(size_t offset) {
 // [asmjit::BaseAssembler - Logging]
 // ============================================================================
 
-#ifndef ASMJIT_DISABLE_LOGGING
+#ifndef ASMJIT_NO_LOGGING
 static void BaseAssembler_logLabel(BaseAssembler* self, const Label& label) noexcept {
-  Logger* logger = self->code()->logger();
+  Logger* logger = self->_code->_logger;
 
-  StringBuilderTmp<512> sb;
+  StringTmp<512> sb;
   size_t binSize = logger->hasFlag(FormatOptions::kFlagMachineCode) ? size_t(0) : std::numeric_limits<size_t>::max();
 
   sb.appendChars(' ', logger->indentation(FormatOptions::kIndentationLabel));
@@ -66,90 +64,75 @@ static void BaseAssembler_logLabel(BaseAssembler* self, const Label& label) noex
 #endif
 
 // ============================================================================
+// [asmjit::BaseAssembler - Section Management]
+// ============================================================================
+
+static void BaseAssembler_initSection(BaseAssembler* self, Section* section) noexcept {
+  uint8_t* p = section->_buffer._data;
+
+  self->_section = section;
+  self->_bufferData = p;
+  self->_bufferPtr  = p + section->_buffer._size;
+  self->_bufferEnd  = p + section->_buffer._capacity;
+}
+
+Error BaseAssembler::section(Section* section) {
+  if (ASMJIT_UNLIKELY(!_code))
+    return reportError(DebugUtils::errored(kErrorNotInitialized));
+
+  if (!_code->isSectionValid(section->id()) || _code->_sections[section->id()] != section)
+    return reportError(DebugUtils::errored(kErrorInvalidSection));
+
+  #ifndef ASMJIT_NO_LOGGING
+  if (hasEmitterOption(kOptionLoggingEnabled))
+    _code->_logger->logf(".section %s {#%u}\n", section->name(), section->id());
+  #endif
+
+  BaseAssembler_initSection(this, section);
+  return kErrorOk;
+}
+
+// ============================================================================
 // [asmjit::BaseAssembler - Label Management]
 // ============================================================================
 
 Label BaseAssembler::newLabel() {
-  uint32_t id = 0;
+  uint32_t labelId = Globals::kInvalidId;
   if (ASMJIT_LIKELY(_code)) {
-    Error err = _code->newLabelId(id);
+    LabelEntry* le;
+    Error err = _code->newLabelEntry(&le);
     if (ASMJIT_UNLIKELY(err))
       reportError(err);
+    labelId = le->id();
   }
-  return Label(id);
+  return Label(labelId);
 }
 
 Label BaseAssembler::newNamedLabel(const char* name, size_t nameSize, uint32_t type, uint32_t parentId) {
-  uint32_t id = 0;
+  uint32_t labelId = Globals::kInvalidId;
   if (ASMJIT_LIKELY(_code)) {
-    Error err = _code->newNamedLabelId(id, name, nameSize, type, parentId);
+    LabelEntry* le;
+    Error err = _code->newNamedLabelEntry(&le, name, nameSize, type, parentId);
     if (ASMJIT_UNLIKELY(err))
       reportError(err);
+    labelId = le->id();
   }
-  return Label(id);
+  return Label(labelId);
 }
 
 Error BaseAssembler::bind(const Label& label) {
   if (ASMJIT_UNLIKELY(!_code))
     return DebugUtils::errored(kErrorNotInitialized);
 
-  LabelEntry* le = _code->labelEntry(label);
-  if (ASMJIT_UNLIKELY(!le))
-    return reportError(DebugUtils::errored(kErrorInvalidLabel));
+  Error err = _code->bindLabel(label, _section->id(), offset());
 
-  // Label can be bound only once.
-  if (ASMJIT_UNLIKELY(le->isBound()))
-    return reportError(DebugUtils::errored(kErrorLabelAlreadyBound));
-
-  #ifndef ASMJIT_DISABLE_LOGGING
+  #ifndef ASMJIT_NO_LOGGING
   if (hasEmitterOption(kOptionLoggingEnabled))
     BaseAssembler_logLabel(this, label);
   #endif
 
-  Error err = kErrorOk;
-  size_t pos = offset();
-
-  LabelLink* link = le->_links;
-  LabelLink* prev = nullptr;
-
-  while (link) {
-    intptr_t offset = intptr_t(link->offset);
-    uint32_t relocId = link->relocId;
-
-    if (relocId != RelocEntry::kInvalidId) {
-      // Adjust relocation data.
-      RelocEntry* re = _code->_relocations[relocId];
-      re->_payload += uint64_t(pos);
-    }
-    else {
-      // Not using relocId, this means that we are overwriting a real
-      // displacement in the CodeBuffer.
-      int32_t patchedValue = int32_t(intptr_t(pos) - offset + link->rel);
-
-      // Size of the value we are going to patch. Only BYTE/DWORD is allowed.
-      uint32_t size = _bufferData[offset];
-      if (size == 4)
-        Support::writeI32u(_bufferData + offset, int32_t(patchedValue));
-      else if (size == 1 && Support::isI8(patchedValue))
-        _bufferData[offset] = uint8_t(patchedValue & 0xFF);
-      else
-        err = DebugUtils::errored(kErrorInvalidDisplacement);
-    }
-
-    prev = link->prev;
-    _code->_unresolvedLabelCount--;
-    _code->allocator()->release(link, sizeof(LabelLink));
-
-    link = prev;
-  }
-
-  // Set as bound.
-  le->_sectionId = _section->id();
-  le->_offset = intptr_t(pos);
-  le->_links = nullptr;
   resetInlineComment();
-
-  if (err != kErrorOk)
+  if (err)
     return reportError(err);
 
   return kErrorOk;
@@ -197,7 +180,7 @@ Error BaseAssembler::_emitOpArray(uint32_t instId, const Operand_* operands, siz
   }
 }
 
-#ifndef ASMJIT_DISABLE_LOGGING
+#ifndef ASMJIT_NO_LOGGING
 void BaseAssembler::_emitLog(
   uint32_t instId, uint32_t options, const Operand_& o0, const Operand_& o1, const Operand_& o2, const Operand_& o3,
   uint32_t relSize, uint32_t immSize, uint8_t* afterCursor) {
@@ -206,7 +189,7 @@ void BaseAssembler::_emitLog(
   ASMJIT_ASSERT(logger != nullptr);
   ASMJIT_ASSERT(options & BaseEmitter::kOptionLoggingEnabled);
 
-  StringBuilderTmp<256> sb;
+  StringTmp<256> sb;
   uint32_t flags = logger->flags();
 
   uint8_t* beforeCursor = _bufferPtr;
@@ -241,7 +224,7 @@ Error BaseAssembler::_emitFailed(
   Error err,
   uint32_t instId, uint32_t options, const Operand_& o0, const Operand_& o1, const Operand_& o2, const Operand_& o3) {
 
-  StringBuilderTmp<256> sb;
+  StringTmp<256> sb;
   sb.appendString(DebugUtils::errorAsString(err));
   sb.appendString(": ");
 
@@ -272,21 +255,32 @@ Error BaseAssembler::_emitFailed(
 // [asmjit::BaseAssembler - Embed]
 // ============================================================================
 
-Error BaseAssembler::embed(const void* data, uint32_t size) {
+struct DataSizeByPower {
+  char str[4];
+};
+
+static const DataSizeByPower dataSizeByPowerTable[] = {
+  { "db" },
+  { "dw" },
+  { "dd" },
+  { "dq" }
+};
+
+Error BaseAssembler::embed(const void* data, uint32_t dataSize) {
   if (ASMJIT_UNLIKELY(!_code))
     return DebugUtils::errored(kErrorNotInitialized);
 
-  if (size == 0)
+  if (dataSize == 0)
     return DebugUtils::errored(kErrorInvalidArgument);
 
-  AsmBufferWriter writer(this);
-  ASMJIT_PROPAGATE(writer.ensureSpace(this, size));
+  CodeBufferWriter writer(this);
+  ASMJIT_PROPAGATE(writer.ensureSpace(this, dataSize));
 
-  writer.emitData(data, size);
+  writer.emitData(data, dataSize);
 
-  #ifndef ASMJIT_DISABLE_LOGGING
+  #ifndef ASMJIT_NO_LOGGING
   if (ASMJIT_UNLIKELY(hasEmitterOption(kOptionLoggingEnabled)))
-    _code->_logger->logBinary(data, size);
+    _code->_logger->logBinary(data, dataSize);
   #endif
 
   writer.done(this);
@@ -304,37 +298,114 @@ Error BaseAssembler::embedLabel(const Label& label) {
   if (ASMJIT_UNLIKELY(!le))
     return reportError(DebugUtils::errored(kErrorInvalidLabel));
 
-  uint32_t size = gpSize();
-  AsmBufferWriter writer(this);
-  ASMJIT_PROPAGATE(writer.ensureSpace(this, size));
+  uint32_t dataSize = gpSize();
+  ASMJIT_ASSERT(dataSize <= 8);
 
-  #ifndef ASMJIT_DISABLE_LOGGING
-  if (ASMJIT_UNLIKELY(hasEmitterOption(kOptionLoggingEnabled)))
-    _code->_logger->logf(size == 4 ? ".dd L%u\n" : ".dq L%u\n", Operand::unpackId(label.id()));
+  CodeBufferWriter writer(this);
+  ASMJIT_PROPAGATE(writer.ensureSpace(this, dataSize));
+
+  #ifndef ASMJIT_NO_LOGGING
+  if (ASMJIT_UNLIKELY(hasEmitterOption(kOptionLoggingEnabled))) {
+    StringTmp<256> sb;
+    sb.appendFormat(".%s ", dataSizeByPowerTable[Support::ctz(dataSize)].str);
+    Logging::formatLabel(sb, 0, this, label.id());
+    sb.appendChar('\n');
+    _code->_logger->log(sb);
+  }
   #endif
 
-  Error err = _code->newRelocEntry(&re, RelocEntry::kTypeRelToAbs, size);
+  // TODO: Does it make sense to calculate the address here if everything is known?
+  /*
+  if (_code->hasBaseAddress() && currentSection() == _code->textSection() && le->isBound()) {
+    uint64_t addr = _code->baseAddress() + _code->textSection()->offset() + le->offset();
+    writer.emitValueLE(addr, dataSize);
+  }
+  */
+
+  Error err = _code->newRelocEntry(&re, RelocEntry::kTypeRelToAbs, dataSize);
   if (ASMJIT_UNLIKELY(err))
     return reportError(err);
 
   re->_sourceSectionId = _section->id();
-  re->_sourceOffset = uint64_t(offset());
+  re->_sourceOffset = offset();
 
   if (le->isBound()) {
-    re->_targetSectionId = le->sectionId();
-    re->_payload = uint64_t(int64_t(le->offset()));
+    re->_targetSectionId = le->section()->id();
+    re->_payload = le->offset();
   }
   else {
     LabelLink* link = _code->newLabelLink(le, _section->id(), offset(), 0);
     if (ASMJIT_UNLIKELY(!link))
-      return reportError(DebugUtils::errored(kErrorNoHeapMemory));
+      return reportError(DebugUtils::errored(kErrorOutOfMemory));
     link->relocId = re->id();
   }
 
-  // Emit dummy DWORD/QWORD depending on the address size.
-  writer.emitZeros(size);
+  // Emit dummy DWORD/QWORD depending on the data size.
+  writer.emitZeros(dataSize);
   writer.done(this);
 
+  return kErrorOk;
+}
+
+Error BaseAssembler::embedLabelDelta(const Label& label, const Label& base, uint32_t dataSize) {
+  if (ASMJIT_UNLIKELY(!_code))
+    return DebugUtils::errored(kErrorNotInitialized);
+
+  LabelEntry* labelEntry = _code->labelEntry(label);
+  LabelEntry* baseEntry = _code->labelEntry(base);
+
+  if (ASMJIT_UNLIKELY(!labelEntry || !baseEntry))
+    return reportError(DebugUtils::errored(kErrorInvalidLabel));
+
+  if (dataSize == 0)
+    dataSize = gpSize();
+
+  if (ASMJIT_UNLIKELY(!Support::isPowerOf2(dataSize) || dataSize > 8))
+    return reportError(DebugUtils::errored(kErrorInvalidOperandSize));
+
+  CodeBufferWriter writer(this);
+  ASMJIT_PROPAGATE(writer.ensureSpace(this, dataSize));
+
+  #ifndef ASMJIT_NO_LOGGING
+  if (ASMJIT_UNLIKELY(hasEmitterOption(kOptionLoggingEnabled))) {
+    StringTmp<256> sb;
+    sb.appendFormat(".%s (", dataSizeByPowerTable[Support::ctz(dataSize)].str);
+    Logging::formatLabel(sb, 0, this, label.id());
+    sb.appendString(" - ");
+    Logging::formatLabel(sb, 0, this, base.id());
+    sb.appendString(")\n");
+    _code->_logger->log(sb);
+  }
+  #endif
+
+  // If both labels are bound within the same section it means the delta can be calculated now.
+  if (labelEntry->isBound() && baseEntry->isBound() && labelEntry->section() == baseEntry->section()) {
+    uint64_t delta = labelEntry->offset() - baseEntry->offset();
+    writer.emitValueLE(delta, dataSize);
+  }
+  else {
+    RelocEntry* re;
+    Error err = _code->newRelocEntry(&re, RelocEntry::kTypeExpression, dataSize);
+    if (ASMJIT_UNLIKELY(err))
+      return reportError(err);
+
+    Expression* exp = _code->_zone.newT<Expression>();
+    if (ASMJIT_UNLIKELY(!exp))
+      return reportError(DebugUtils::errored(kErrorOutOfMemory));
+
+    exp->reset();
+    exp->opType = Expression::kOpSub;
+    exp->setValueAsLabel(0, labelEntry);
+    exp->setValueAsLabel(1, baseEntry);
+
+    re->_sourceSectionId = _section->id();
+    re->_sourceOffset = offset();
+    re->_payload = (uint64_t)(uintptr_t)exp;
+
+    writer.emitZeros(dataSize);
+  }
+
+  writer.done(this);
   return kErrorOk;
 }
 
@@ -349,12 +420,12 @@ Error BaseAssembler::embedConstPool(const Label& label, const ConstPool& pool) {
   ASMJIT_PROPAGATE(bind(label));
 
   size_t size = pool.size();
-  AsmBufferWriter writer(this);
+  CodeBufferWriter writer(this);
   ASMJIT_PROPAGATE(writer.ensureSpace(this, size));
 
   pool.fill(writer.cursor());
 
-  #ifndef ASMJIT_DISABLE_LOGGING
+  #ifndef ASMJIT_NO_LOGGING
   if (ASMJIT_UNLIKELY(hasEmitterOption(kOptionLoggingEnabled)))
     _code->_logger->logBinary(writer.cursor(), size);
   #endif
@@ -373,7 +444,7 @@ Error BaseAssembler::comment(const char* data, size_t size) {
   if (ASMJIT_UNLIKELY(!_code))
     return DebugUtils::errored(kErrorNotInitialized);
 
-  #ifndef ASMJIT_DISABLE_LOGGING
+  #ifndef ASMJIT_NO_LOGGING
   if (hasEmitterOption(kOptionLoggingEnabled)) {
     Logger* logger = _code->logger();
     logger->log(data, size);
@@ -396,13 +467,9 @@ Error BaseAssembler::onAttach(CodeHolder* code) noexcept {
   ASMJIT_PROPAGATE(Base::onAttach(code));
 
   // Attach to the end of the .text section.
-  _section = code->_sectionEntries[0];
-  uint8_t* p = _section->_buffer._data;
+  BaseAssembler_initSection(this, code->_sections[0]);
 
-  _bufferData = p;
-  _bufferPtr  = p + _section->_buffer._size;
-  _bufferEnd  = p + _section->_buffer._capacity;
-
+  // And reset everything that is used temporarily.
   _op4.reset();
   _op5.reset();
 

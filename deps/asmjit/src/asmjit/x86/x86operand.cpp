@@ -1,17 +1,14 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Guard]
 #include "../core/build.h"
 #ifdef ASMJIT_BUILD_X86
 
-// [Dependencies]
 #include "../core/misc_p.h"
 #include "../x86/x86operand.h"
 
@@ -24,12 +21,12 @@ ASMJIT_BEGIN_SUB_NAMESPACE(x86)
 const OpData opData = {
   {
     // RegInfo[]
-    # define VALUE(X) { RegTraits<X>::kSignature }
+    #define VALUE(X) { RegTraits<X>::kSignature }
     { ASMJIT_LOOKUP_TABLE_32(VALUE, 0) },
     #undef VALUE
 
     // RegCount[]
-    # define VALUE(X) RegTraits<X>::kCount
+    #define VALUE(X) RegTraits<X>::kCount
     { ASMJIT_LOOKUP_TABLE_32(VALUE, 0) },
     #undef VALUE
 
@@ -44,7 +41,7 @@ const OpData opData = {
 // [asmjit::x86::Operand - Unit]
 // ============================================================================
 
-#if defined(ASMJIT_BUILD_TEST)
+#if defined(ASMJIT_TEST)
 UNIT(asmjit_x86_operand) {
   Label L(1000); // Label with some ID.
 
@@ -244,5 +241,4 @@ UNIT(asmjit_x86_operand) {
 
 ASMJIT_END_SUB_NAMESPACE
 
-// [Guard]
 #endif // ASMJIT_BUILD_X86

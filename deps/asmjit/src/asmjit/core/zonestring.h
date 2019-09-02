@@ -1,20 +1,18 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_SMALLSTRING_H
 #define _ASMJIT_CORE_SMALLSTRING_H
 
-// [Dependencies]
 #include "../core/globals.h"
 #include "../core/zone.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_support
+//! \addtogroup asmjit_zone
 //! \{
 
 // ============================================================================
@@ -22,34 +20,6 @@ ASMJIT_BEGIN_NAMESPACE
 // ============================================================================
 
 struct ZoneStringBase {
-  inline void reset() noexcept {
-    _dummy = nullptr;
-    _external = nullptr;
-  }
-
-  Error setData(Zone* zone, uint32_t maxEmbeddedSize, const char* str, size_t size) noexcept {
-    if (size == Globals::kNullTerminated)
-      size = std::strlen(str);
-
-    if (size <= maxEmbeddedSize) {
-      std::memcpy(_embedded, str, size);
-      _embedded[size] = '\0';
-    }
-    else {
-      char* external = static_cast<char*>(zone->dup(str, size, true));
-      if (ASMJIT_UNLIKELY(!external))
-        return DebugUtils::errored(kErrorNoHeapMemory);
-      _external = external;
-    }
-
-    _size = uint32_t(size);
-    return kErrorOk;
-  }
-
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
   union {
     struct {
       uint32_t _size;
@@ -60,6 +30,30 @@ struct ZoneStringBase {
       char* _external;
     };
   };
+
+  inline void reset() noexcept {
+    _dummy = nullptr;
+    _external = nullptr;
+  }
+
+  Error setData(Zone* zone, uint32_t maxEmbeddedSize, const char* str, size_t size) noexcept {
+    if (size == SIZE_MAX)
+      size = strlen(str);
+
+    if (size <= maxEmbeddedSize) {
+      memcpy(_embedded, str, size);
+      _embedded[size] = '\0';
+    }
+    else {
+      char* external = static_cast<char*>(zone->dup(str, size, true));
+      if (ASMJIT_UNLIKELY(!external))
+        return DebugUtils::errored(kErrorOutOfMemory);
+      _external = external;
+    }
+
+    _size = uint32_t(size);
+    return kErrorOk;
+  }
 };
 
 // ============================================================================
@@ -78,16 +72,21 @@ public:
     (N > sizeof(ZoneStringBase)) ? uint32_t(N) : uint32_t(sizeof(ZoneStringBase));
   static constexpr uint32_t kMaxEmbeddedSize = kWholeSize - 5;
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  union {
+    ZoneStringBase _base;
+    char _wholeData[kWholeSize];
+  };
+
+  //! \name Construction & Destruction
+  //! \{
 
   inline ZoneString() noexcept { reset(); }
   inline void reset() noexcept { _base.reset(); }
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Accessors
+  //! \{
 
   inline const char* data() const noexcept { return _base._size <= kMaxEmbeddedSize ? _base._embedded : _base._external; }
   inline bool empty() const noexcept { return _base._size == 0; }
@@ -99,19 +98,11 @@ public:
     return _base.setData(zone, kMaxEmbeddedSize, data, size);
   }
 
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  union {
-    ZoneStringBase _base;
-    char _wholeData[kWholeSize];
-  };
+  //! \}
 };
 
 //! \}
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
 #endif // _ASMJIT_CORE_SMALLSTRING_H

@@ -1,10 +1,9 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Dependencies]
 #include "./asmjit.h"
 
 using namespace asmjit;
@@ -18,21 +17,34 @@ struct DumpCpuFeature {
   const char* name;
 };
 
-static void dumpFeatures(const CpuInfo& cpu, const DumpCpuFeature* data, size_t count) {
+static const char* hostArch() noexcept {
+  switch (ArchInfo::kIdHost) {
+    case ArchInfo::kIdX86: return "X86";
+    case ArchInfo::kIdX64: return "X64";
+    case ArchInfo::kIdA32: return "ARM32";
+    case ArchInfo::kIdA64: return "ARM64";
+    default: return "Unknown";
+  }
+}
+
+static void dumpFeatures(const CpuInfo& cpu, const DumpCpuFeature* data, size_t count) noexcept {
   for (size_t i = 0; i < count; i++)
     if (cpu.hasFeature(data[i].feature))
       INFO("  %s", data[i].name);
 }
 
-static void dumpCpu(void) {
+static void dumpCpu(void) noexcept {
   const CpuInfo& cpu = CpuInfo::host();
 
   INFO("Host CPU:");
   INFO("  Vendor                  : %s", cpu.vendor());
   INFO("  Brand                   : %s", cpu.brand());
   INFO("  Model ID                : %u", cpu.modelId());
+  INFO("  Brand ID                : %u", cpu.brandId());
   INFO("  Family ID               : %u", cpu.familyId());
   INFO("  Stepping                : %u", cpu.stepping());
+  INFO("  Processor Type          : %u", cpu.processorType());
+  INFO("  Max logical Processors  : %u", cpu.maxLogicalProcessors());
   INFO("  Cache-Line Size         : %u", cpu.cacheLineSize());
   INFO("  HW-Thread Count         : %u", cpu.hwThreadCount());
   INFO("");
@@ -135,12 +147,6 @@ static void dumpCpu(void) {
     { x86::Features::kXSAVES          , "XSAVES"           }
   };
 
-  INFO("X86 Specific:");
-  INFO("  Processor Type          : %u", cpu.x86ProcessorType());
-  INFO("  Brand Index             : %u", cpu.x86BrandIndex());
-  INFO("  Max logical Processors  : %u", cpu.x86MaxLogicalProcessors());
-  INFO("");
-
   INFO("X86 Features:");
   dumpFeatures(cpu, x86FeaturesList, ASMJIT_ARRAY_SIZE(x86FeaturesList));
   INFO("");
@@ -181,7 +187,7 @@ static void dumpCpu(void) {
 // [DumpSizeOf]
 // ============================================================================
 
-static void dumpSizeOf(void) {
+static void dumpSizeOf(void) noexcept {
   #define DUMP_TYPE(...) \
     INFO("  %-26s: %u", #__VA_ARGS__, uint32_t(sizeof(__VA_ARGS__)))
 
@@ -207,8 +213,8 @@ static void dumpSizeOf(void) {
     DUMP_TYPE(ConstPool);
     DUMP_TYPE(LabelEntry);
     DUMP_TYPE(RelocEntry);
-    DUMP_TYPE(SectionEntry);
-    DUMP_TYPE(StringBuilder);
+    DUMP_TYPE(Section);
+    DUMP_TYPE(String);
     DUMP_TYPE(Target);
     DUMP_TYPE(Zone);
     DUMP_TYPE(ZoneAllocator);
@@ -236,7 +242,7 @@ static void dumpSizeOf(void) {
     DUMP_TYPE(FuncArgsAssignment);
   INFO("");
 
-  #ifndef ASMJIT_DISABLE_BUILDER
+  #ifndef ASMJIT_NO_BUILDER
   INFO("Size of builder classes:");
     DUMP_TYPE(BaseBuilder);
     DUMP_TYPE(BaseNode);
@@ -245,14 +251,14 @@ static void dumpSizeOf(void) {
     DUMP_TYPE(AlignNode);
     DUMP_TYPE(LabelNode);
     DUMP_TYPE(EmbedDataNode);
-    DUMP_TYPE(LabelDataNode);
+    DUMP_TYPE(EmbedLabelNode);
     DUMP_TYPE(ConstPoolNode);
     DUMP_TYPE(CommentNode);
     DUMP_TYPE(SentinelNode);
   INFO("");
   #endif
 
-  #ifndef ASMJIT_DISABLE_COMPILER
+  #ifndef ASMJIT_NO_COMPILER
   INFO("Size of compiler classes:");
     DUMP_TYPE(BaseCompiler);
     DUMP_TYPE(FuncNode);
@@ -264,15 +270,14 @@ static void dumpSizeOf(void) {
   #ifdef ASMJIT_BUILD_X86
   INFO("Size of x86-specific classes:");
     DUMP_TYPE(x86::Assembler);
-    #ifndef ASMJIT_DISABLE_BUILDER
+    #ifndef ASMJIT_NO_BUILDER
     DUMP_TYPE(x86::Builder);
     #endif
-    #ifndef ASMJIT_DISABLE_COMPILER
+    #ifndef ASMJIT_NO_COMPILER
     DUMP_TYPE(x86::Compiler);
     #endif
     DUMP_TYPE(x86::InstDB::InstInfo);
     DUMP_TYPE(x86::InstDB::CommonInfo);
-    DUMP_TYPE(x86::InstDB::ExecutionInfo);
     DUMP_TYPE(x86::InstDB::OpSignature);
     DUMP_TYPE(x86::InstDB::InstSignature);
   INFO("");
@@ -285,23 +290,25 @@ static void dumpSizeOf(void) {
 // [Main]
 // ============================================================================
 
-static void onBeforeRun(void) {
+static void onBeforeRun(void) noexcept {
   dumpCpu();
   dumpSizeOf();
 }
 
 int main(int argc, const char* argv[]) {
   #if defined(ASMJIT_BUILD_DEBUG)
-  const char buildType[] = "DEBUG";
+  const char buildType[] = "Debug";
   #else
-  const char buildType[] = "RELEASE";
+  const char buildType[] = "Release";
   #endif
 
-  INFO("AsmJit Unit-Test (v%u.%u.%u [%s])\n\n",
+  INFO("AsmJit Unit-Test v%u.%u.%u [Arch=%s] [Mode=%s]\n\n",
     unsigned((ASMJIT_LIBRARY_VERSION >> 16)       ),
     unsigned((ASMJIT_LIBRARY_VERSION >>  8) & 0xFF),
     unsigned((ASMJIT_LIBRARY_VERSION      ) & 0xFF),
+    hostArch(),
     buildType
   );
+
   return BrokenAPI::run(argc, argv, onBeforeRun);
 }

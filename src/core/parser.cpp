@@ -21,7 +21,7 @@ std::shared_ptr<ps::Object> ps::Parser::GetObject()
   while (!finished && m_input.get(c))
   {
     //just skip any of these
-    if (c == '\r')
+    if ((c == '\r') || (c== '\t'))
       continue;
 
     //Skip any comments

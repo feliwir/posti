@@ -1,25 +1,61 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_GLOBALS_H
 #define _ASMJIT_CORE_GLOBALS_H
 
-// [Dependencies]
 #include "../core/build.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_api
+// ============================================================================
+// [asmjit::Support]
+// ============================================================================
+
+//! \cond INTERNAL
+//! \addtogroup Support
 //! \{
+namespace Support {
+  //! Cast designed to cast between function and void* pointers.
+  template<typename Dst, typename Src>
+  static inline Dst ptr_cast_impl(Src p) noexcept { return (Dst)p; }
+} // {Support}
+
+#if defined(ASMJIT_NO_STDCXX)
+namespace Support {
+  ASMJIT_INLINE void* operatorNew(size_t n) noexcept { return malloc(n); }
+  ASMJIT_INLINE void operatorDelete(void* p) noexcept { if (p) free(p); }
+} // {Support}
+
+#define ASMJIT_BASE_CLASS(TYPE)                                               \
+  ASMJIT_INLINE void* operator new(size_t n) noexcept {                       \
+    return Support::operatorNew(n);                                           \
+  }                                                                           \
+                                                                              \
+  ASMJIT_INLINE void  operator delete(void* p) noexcept {                     \
+    Support::operatorDelete(p);                                               \
+  }                                                                           \
+                                                                              \
+  ASMJIT_INLINE void* operator new(size_t, void* p) noexcept { return p; }    \
+  ASMJIT_INLINE void  operator delete(void*, void*) noexcept {}
+#else
+#define ASMJIT_BASE_CLASS(TYPE)
+#endif
+
+//! \}
+//! \endcond
 
 // ============================================================================
 // [asmjit::Globals]
 // ============================================================================
 
+//! \addtogroup asmjit_core
+//! \{
+
+//! Contains typedefs, constants, and variables used globally by AsmJit.
 namespace Globals {
 
 // ============================================================================
@@ -27,13 +63,13 @@ namespace Globals {
 // ============================================================================
 
 //! Host memory allocator overhead.
-constexpr uint32_t kMemAllocOverhead = uint32_t(sizeof(intptr_t) * 4);
+constexpr uint32_t kAllocOverhead = uint32_t(sizeof(intptr_t) * 4);
 
 //! Host memory allocator alignment.
-constexpr uint32_t kMemAllocAlignment = 8;
+constexpr uint32_t kAllocAlignment = 8;
 
 //! Aggressive growing strategy threshold.
-constexpr uint32_t kAllocThreshold = 8192 * 1024;
+constexpr uint32_t kGrowThreshold = 1024 * 1024 * 16;
 
 //! Maximum height of RB-Tree is:
 //!
@@ -63,29 +99,20 @@ constexpr uint32_t kMaxAlignment = 64;
 //! Maximum label or symbol size in bytes.
 constexpr uint32_t kMaxLabelNameSize = 2048;
 
+//! Maximum section name size.
+constexpr uint32_t kMaxSectionNameSize = 35;
+
 //! Maximum size of comment.
 constexpr uint32_t kMaxCommentSize = 1024;
 
-//! Returned by `indexOf()` and similar when working with containers that use 32-bit index/size.
-constexpr uint32_t kNotFound = std::numeric_limits<uint32_t>::max();
+//! Invalid identifier.
+constexpr uint32_t kInvalidId = 0xFFFFFFFFu;
 
-//! The size of the string is not known, but the string is null terminated.
-constexpr size_t kNullTerminated = std::numeric_limits<size_t>::max();
+//! Returned by `indexOf()` and similar when working with containers that use 32-bit index/size.
+constexpr uint32_t kNotFound = 0xFFFFFFFFu;
 
 //! Invalid base address.
 constexpr uint64_t kNoBaseAddress = ~uint64_t(0);
-
-// ============================================================================
-// [asmjit::Globals::ByteOrder]
-// ============================================================================
-
-//! Byte order.
-enum ByteOrder : uint32_t {
-  kByteOrderLE      = 0,
-  kByteOrderBE      = 1,
-  kByteOrderNative  = ASMJIT_ARCH_LE ? kByteOrderLE : kByteOrderBE,
-  kByteOrderSwapped = ASMJIT_ARCH_LE ? kByteOrderBE : kByteOrderLE
-};
 
 // ============================================================================
 // [asmjit::Globals::ResetPolicy]
@@ -119,10 +146,10 @@ enum Link : uint32_t {
 struct Init_ {};
 struct NoInit_ {};
 
-constexpr Init_ Init {};
-constexpr NoInit_ NoInit {};
+static const constexpr Init_ Init {};
+static const constexpr NoInit_ NoInit {};
 
-} // Globals namespace
+} // {Globals}
 
 // ============================================================================
 // [asmjit::Error]
@@ -136,11 +163,8 @@ enum ErrorCode : uint32_t {
   //! No error (success).
   kErrorOk = 0,
 
-  //! Heap memory allocation failed.
-  kErrorNoHeapMemory,
-
-  //! Virtual memory allocation failed.
-  kErrorNoVirtualMemory,
+  //! Out of memory.
+  kErrorOutOfMemory,
 
   //! Invalid argument.
   kErrorInvalidArgument,
@@ -163,21 +187,24 @@ enum ErrorCode : uint32_t {
   //! Built-in feature was disabled at compile time and it's not available.
   kErrorFeatureNotEnabled,
 
+  //! Too many handles (Windows) or file descriptors (Unix/Posix).
+  kErrorTooManyHandles,
+  //! Code generated is larger than allowed.
+  kErrorTooLarge,
+
   //! No code generated.
   //!
   //! Returned by runtime if the `CodeHolder` contains no code.
   kErrorNoCodeGenerated,
-  //! Code generated is larger than allowed.
-  kErrorCodeTooLarge,
 
   //! Invalid directive.
   kErrorInvalidDirective,
   //! Attempt to use uninitialized label.
   kErrorInvalidLabel,
-  //! Label index overflow - a single `Assembler` instance can hold more than
-  //! 2 billion labels (2147483391 to be exact). If there is an attempt to
-  //! create more labels this error is returned.
-  kErrorLabelIndexOverflow,
+  //! Label index overflow - a single `Assembler` instance can hold almost
+  //! 2^32 (4 billion) labels. If there is an attempt to create more labels
+  //! then this error is returned.
+  kErrorTooManyLabels,
   //! Label is already bound.
   kErrorLabelAlreadyBound,
   //! Label is already defined (named labels).
@@ -191,11 +218,22 @@ enum ErrorCode : uint32_t {
   //! Parent id specified for a non-local (global) label.
   kErrorNonLocalLabelCantHaveParent,
 
-  //! Relocation index overflow.
-  kErrorRelocIndexOverflow,
+  //! Invalid section.
+  kErrorInvalidSection,
+  //! Too many sections (section index overflow).
+  kErrorTooManySections,
+  //! Invalid section name (most probably too long).
+  kErrorInvalidSectionName,
+
+  //! Relocation index overflow (too many relocations).
+  kErrorTooManyRelocations,
   //! Invalid relocation entry.
   kErrorInvalidRelocEntry,
+  //! Reloc entry contains address that is out of range (unencodable).
+  kErrorRelocOffsetOutOfRange,
 
+  //! Invalid assignment to a register, function argument, or function return value.
+  kErrorInvalidAssignment,
   //! Invalid instruction.
   kErrorInvalidInstruction,
   //! Invalid register type.
@@ -218,8 +256,8 @@ enum ErrorCode : uint32_t {
   kErrorInvalidRepPrefix,
   //! Invalid REX prefix.
   kErrorInvalidRexPrefix,
-  //! Invalid mask register (not 'k').
-  kErrorInvalidKMaskReg,
+  //! Invalid {...} register.
+  kErrorInvalidExtraReg,
   //! Invalid {k} use (not supported by the instruction).
   kErrorInvalidKMaskUse,
   //! Invalid {k}{z} use (not supported by the instruction).
@@ -236,6 +274,8 @@ enum ErrorCode : uint32_t {
   kErrorInvalidAddressScale,
   //! Invalid use of 64-bit address.
   kErrorInvalidAddress64Bit,
+  //! Invalid use of 64-bit address that require 32-bit zero-extension (X64).
+  kErrorInvalidAddress64BitZeroExtension,
   //! Invalid displacement (not encodable).
   kErrorInvalidDisplacement,
   //! Invalid segment (X86).
@@ -274,29 +314,43 @@ enum ErrorCode : uint32_t {
   //! Invalid register to hold stack arguments offset.
   kErrorOverlappingStackRegWithRegArg,
 
+  //! Unbound label cannot be evaluated by expression.
+  kErrorExpressionLabelNotBound,
+  //! Arithmetic overflow during expression evaluation.
+  kErrorExpressionOverflow,
+
   //! Count of AsmJit error codes.
   kErrorCount
 };
 
 // ============================================================================
-// [asmjit::PointerCast]
+// [asmjit::ByteOrder]
 // ============================================================================
 
-namespace AsmJitInternal {
-  //! Cast designed to cast between function and void* pointers.
-  template<typename Dst, typename Src>
-  static inline Dst ptr_cast(Src p) noexcept { return (Dst)p; }
+//! Byte order.
+namespace ByteOrder {
+  enum : uint32_t {
+    kLE      = 0,
+    kBE      = 1,
+    kNative  = ASMJIT_ARCH_LE ? kLE : kBE,
+    kSwapped = ASMJIT_ARCH_LE ? kBE : kLE
+  };
 }
 
+// ============================================================================
+// [asmjit::ptr_as_func / func_as_ptr]
+// ============================================================================
+
 template<typename Func>
-static inline Func ptr_as_func(void* func) noexcept { return AsmJitInternal::ptr_cast<Func, void*>(func); }
+static inline Func ptr_as_func(void* func) noexcept { return Support::ptr_cast_impl<Func, void*>(func); }
 template<typename Func>
-static inline void* func_as_ptr(Func func) noexcept { return AsmJitInternal::ptr_cast<void*, Func>(func); }
+static inline void* func_as_ptr(Func func) noexcept { return Support::ptr_cast_impl<void*, Func>(func); }
 
 // ============================================================================
 // [asmjit::DebugUtils]
 // ============================================================================
 
+//! Debugging utilities.
 namespace DebugUtils {
 
 //! Returns the error `err` passed.
@@ -305,7 +359,7 @@ namespace DebugUtils {
 //! help with tracing the origin of any error reported / returned by AsmJit.
 static constexpr Error errored(Error err) noexcept { return err; }
 
-//! Get a printable version of `asmjit::Error` code.
+//! Returns a printable version of `asmjit::Error` code.
 ASMJIT_API const char* errorAsString(Error err) noexcept;
 
 //! Called to output debugging message(s).
@@ -323,18 +377,16 @@ ASMJIT_API void debugOutput(const char* str) noexcept;
 ASMJIT_API void ASMJIT_NORETURN assertionFailed(const char* file, int line, const char* msg) noexcept;
 
 #if defined(ASMJIT_BUILD_DEBUG)
-  #define ASMJIT_ASSERT(EXP)                                           \
-    do {                                                               \
-      if (ASMJIT_LIKELY(EXP))                                          \
-        break;                                                         \
-      ::asmjit::DebugUtils::assertionFailed(__FILE__, __LINE__, #EXP); \
-    } while (0)
+#define ASMJIT_ASSERT(EXP)                                                     \
+  do {                                                                         \
+    if (ASMJIT_LIKELY(EXP))                                                    \
+      break;                                                                   \
+    ::asmjit::DebugUtils::assertionFailed(__FILE__, __LINE__, #EXP);           \
+  } while (0)
 #else
-  #define ASMJIT_ASSERT(EXP) ((void)0)
+#define ASMJIT_ASSERT(EXP) ((void)0)
 #endif
 
-//! \internal
-//!
 //! Used by AsmJit to propagate a possible `Error` produced by `...` to the caller.
 #define ASMJIT_PROPAGATE(...)               \
   do {                                      \
@@ -343,11 +395,10 @@ ASMJIT_API void ASMJIT_NORETURN assertionFailed(const char* file, int line, cons
       return _err;                          \
   } while (0)
 
-} // DebugUtils namespace
+} // {DebugUtils}
 
 //! \}
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
 #endif // _ASMJIT_CORE_GLOBALS_H

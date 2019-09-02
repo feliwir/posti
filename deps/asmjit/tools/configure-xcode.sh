@@ -1,9 +1,9 @@
 #!/bin/sh
 
-CURRENT_DIR=`pwd`
 BUILD_DIR="build_xcode"
+CURRENT_DIR=`pwd`
 
 mkdir -p ../${BUILD_DIR}
 cd ../${BUILD_DIR}
-cmake .. -G"Xcode" -DASMJIT_BUILD_TEST=1
+cmake .. -G"Xcode" -DASMJIT_TEST=1
 cd ${CURRENT_DIR}

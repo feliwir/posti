@@ -1,23 +1,20 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Export]
 #define ASMJIT_EXPORTS
 
-// [Guard]
 #include "../core/build.h"
 #if defined(ASMJIT_BUILD_X86) && ASMJIT_ARCH_X86
 
-// [Dependencies]
 #include "../core/cpuinfo.h"
 #include "../core/support.h"
 #include "../x86/x86features.h"
 
 // Required by `__cpuidex()` and `_xgetbv()`.
-#if ASMJIT_CXX_MSC
+#if defined(_MSC_VER)
   #include <intrin.h>
 #endif
 
@@ -31,31 +28,31 @@ struct cpuid_t { uint32_t eax, ebx, ecx, edx; };
 struct xgetbv_t { uint32_t eax, edx; };
 
 // Executes `cpuid` instruction.
-static inline void cpuid_query(cpuid_t* out, uint32_t inEax, uint32_t inEcx = 0) noexcept {
-  #if ASMJIT_CXX_MSC
+static inline void cpuidQuery(cpuid_t* out, uint32_t inEax, uint32_t inEcx = 0) noexcept {
+#if defined(_MSC_VER)
   __cpuidex(reinterpret_cast<int*>(out), inEax, inEcx);
-  #elif ASMJIT_CXX_GNU && ASMJIT_ARCH_X86 == 32
+#elif defined(__GNUC__) && ASMJIT_ARCH_X86 == 32
   __asm__ __volatile__(
     "mov %%ebx, %%edi\n"
     "cpuid\n"
     "xchg %%edi, %%ebx\n" : "=a"(out->eax), "=D"(out->ebx), "=c"(out->ecx), "=d"(out->edx) : "a"(inEax), "c"(inEcx));
-  #elif ASMJIT_CXX_GNU && ASMJIT_ARCH_X86 == 64
+#elif defined(__GNUC__) && ASMJIT_ARCH_X86 == 64
   __asm__ __volatile__(
     "mov %%rbx, %%rdi\n"
     "cpuid\n"
     "xchg %%rdi, %%rbx\n" : "=a"(out->eax), "=D"(out->ebx), "=c"(out->ecx), "=d"(out->edx) : "a"(inEax), "c"(inEcx));
-  #else
-  #error "[asmjit] x86::cpuid_query() - Unsupported compiler."
-  #endif
+#else
+  #error "[asmjit] x86::cpuidQuery() - Unsupported compiler."
+#endif
 }
 
 // Executes 'xgetbv' instruction.
-static inline void xgetbv_query(xgetbv_t* out, uint32_t inEcx) noexcept {
-  #if ASMJIT_CXX_MSC
+static inline void xgetbvQuery(xgetbv_t* out, uint32_t inEcx) noexcept {
+#if defined(_MSC_VER)
   uint64_t value = _xgetbv(inEcx);
   out->eax = uint32_t(value & 0xFFFFFFFFu);
   out->edx = uint32_t(value >> 32);
-  #elif ASMJIT_CXX_GNU
+#elif defined(__GNUC__)
   uint32_t outEax;
   uint32_t outEdx;
 
@@ -65,10 +62,10 @@ static inline void xgetbv_query(xgetbv_t* out, uint32_t inEcx) noexcept {
 
   out->eax = outEax;
   out->edx = outEdx;
-  #else
+#else
   out->eax = 0;
   out->edx = 0;
-  #endif
+#endif
 }
 
 // Map a 12-byte vendor string returned by `cpuid` into a `CpuInfo::Vendor` ID.
@@ -90,7 +87,7 @@ static inline void simplifyCpuVendor(CpuInfo& cpu, uint32_t d0, uint32_t d1, uin
   for (i = 0; i < ASMJIT_ARRAY_SIZE(table) - 1; i++)
     if (table[i].d[0] == d0 && table[i].d[1] == d1 && table[i].d[2] == d2)
       break;
-  std::memcpy(cpu._vendor.str, table[i].normalized, 8);
+  memcpy(cpu._vendor.str, table[i].normalized, 8);
 }
 
 static inline void simplifyCpuBrand(char* s) noexcept {
@@ -106,11 +103,8 @@ static inline void simplifyCpuBrand(char* s) noexcept {
     if (curr == 0)
       break;
 
-    if (!(curr == ' ' && (prev == '@' || s[1] == ' ' || s[1] == '@'))) {
-      d[0] = curr;
-      d++;
-      prev = curr;
-    }
+    if (!(curr == ' ' && (prev == '@' || s[1] == ' ' || s[1] == '@')))
+      *d++ = prev = curr;
 
     curr = *++s;
     s[0] = '\0';
@@ -126,7 +120,9 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
   xgetbv_t xcr0 { 0, 0 };
   Features& features = cpu._features.as<Features>();
 
+  cpu.reset();
   cpu._archInfo.init(ArchInfo::kIdHost);
+  cpu._maxLogicalProcessors = 1;
   features.add(Features::kI486);
 
   // --------------------------------------------------------------------------
@@ -134,7 +130,7 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
   // --------------------------------------------------------------------------
 
   // Get vendor string/id.
-  cpuid_query(&regs, 0x0);
+  cpuidQuery(&regs, 0x0);
 
   uint32_t maxId = regs.eax;
   simplifyCpuVendor(cpu, regs.ebx, regs.edx, regs.ecx);
@@ -145,7 +141,7 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
 
   if (maxId >= 0x1) {
     // Get feature flags in ECX/EDX and family/model in EAX.
-    cpuid_query(&regs, 0x1);
+    cpuidQuery(&regs, 0x1);
 
     // Fill family and model fields.
     uint32_t modelId  = (regs.eax >> 4) & 0x0F;
@@ -158,14 +154,13 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
     if (familyId == 0x0Fu)
       familyId += (((regs.eax >> 20) & 0xFFu) << 4);
 
-    cpu._modelId  = modelId;
-    cpu._familyId = familyId;
-    cpu._stepping = regs.eax & 0x0F;
-    cpu._cacheLineSize = ((regs.ebx >>  8) & 0xFF) * 8;
-
-    cpu._x86Data._processorType        = ((regs.eax >> 12) & 0x03);
-    cpu._x86Data._brandIndex           = ((regs.ebx      ) & 0xFF);
-    cpu._x86Data._maxLogicalProcessors = ((regs.ebx >> 16) & 0xFF);
+    cpu._modelId              = modelId;
+    cpu._familyId             = familyId;
+    cpu._brandId              = ((regs.ebx      ) & 0xFF);
+    cpu._processorType        = ((regs.eax >> 12) & 0x03);
+    cpu._maxLogicalProcessors = ((regs.ebx >> 16) & 0xFF);
+    cpu._stepping             = ((regs.eax      ) & 0x0F);
+    cpu._cacheLineSize        = ((regs.ebx >>  8) & 0xFF) * 8;
 
     if (bitTest(regs.ecx,  0)) features.add(Features::kSSE3);
     if (bitTest(regs.ecx,  1)) features.add(Features::kPCLMULQDQ);
@@ -182,7 +177,6 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
     if (bitTest(regs.ecx, 26)) features.add(Features::kXSAVE);
     if (bitTest(regs.ecx, 27)) features.add(Features::kOSXSAVE);
     if (bitTest(regs.ecx, 30)) features.add(Features::kRDRAND);
-
     if (bitTest(regs.edx,  0)) features.add(Features::kFPU);
     if (bitTest(regs.edx,  4)) features.add(Features::kRDTSC);
     if (bitTest(regs.edx,  5)) features.add(Features::kMSR);
@@ -191,15 +185,13 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
     if (bitTest(regs.edx, 19)) features.add(Features::kCLFLUSH);
     if (bitTest(regs.edx, 23)) features.add(Features::kMMX);
     if (bitTest(regs.edx, 24)) features.add(Features::kFXSR);
-    if (bitTest(regs.edx, 25)) features.add(Features::kSSE,
-                                            Features::kMMX2);
-    if (bitTest(regs.edx, 26)) features.add(Features::kSSE,
-                                            Features::kSSE2);
+    if (bitTest(regs.edx, 25)) features.add(Features::kSSE, Features::kMMX2);
+    if (bitTest(regs.edx, 26)) features.add(Features::kSSE, Features::kSSE2);
     if (bitTest(regs.edx, 28)) features.add(Features::kMT);
 
     // Get the content of XCR0 if supported by CPU and enabled by OS.
     if ((regs.ecx & 0x0C000000u) == 0x0C000000u) {
-      xgetbv_query(&xcr0, 0);
+      xgetbvQuery(&xcr0, 0);
     }
 
     // Detect AVX+.
@@ -223,7 +215,8 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
   bool maybeMPX = false;
 
   if (maxId >= 0x7) {
-    cpuid_query(&regs, 0x7);
+    cpuidQuery(&regs, 0x7);
+    uint32_t maxSubLeafId = regs.eax;
 
     if (bitTest(regs.ebx,  0)) features.add(Features::kFSGSBASE);
     if (bitTest(regs.ebx,  3)) features.add(Features::kBMI);
@@ -240,8 +233,13 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
     if (bitTest(regs.ebx, 23)) features.add(Features::kCLFLUSHOPT);
     if (bitTest(regs.ebx, 24)) features.add(Features::kCLWB);
     if (bitTest(regs.ebx, 29)) features.add(Features::kSHA);
-
     if (bitTest(regs.ecx,  0)) features.add(Features::kPREFETCHWT1);
+    if (bitTest(regs.ecx, 22)) features.add(Features::kRDPID);
+    if (bitTest(regs.ecx, 25)) features.add(Features::kCLDEMOTE);
+    if (bitTest(regs.ecx, 27)) features.add(Features::kMOVDIRI);
+    if (bitTest(regs.ecx, 28)) features.add(Features::kMOVDIR64B);
+    if (bitTest(regs.ecx, 29)) features.add(Features::kENQCMD);
+    if (bitTest(regs.edx, 18)) features.add(Features::kPCONFIG);
 
     // Detect 'TSX' - Requires at least one of `HLE` and `RTM` features.
     if (features.hasHLE() || features.hasRTM())
@@ -265,8 +263,8 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
         if (bitTest(regs.ebx, 28)) features.add(Features::kAVX512_CDI);
         if (bitTest(regs.ebx, 30)) features.add(Features::kAVX512_BW);
         if (bitTest(regs.ebx, 31)) features.add(Features::kAVX512_VL);
-
         if (bitTest(regs.ecx,  1)) features.add(Features::kAVX512_VBMI);
+        if (bitTest(regs.ecx,  5)) features.add(Features::kWAITPKG);
         if (bitTest(regs.ecx,  6)) features.add(Features::kAVX512_VBMI2);
         if (bitTest(regs.ecx,  8)) features.add(Features::kGFNI);
         if (bitTest(regs.ecx,  9)) features.add(Features::kVAES);
@@ -274,10 +272,16 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
         if (bitTest(regs.ecx, 11)) features.add(Features::kAVX512_VNNI);
         if (bitTest(regs.ecx, 12)) features.add(Features::kAVX512_BITALG);
         if (bitTest(regs.ecx, 14)) features.add(Features::kAVX512_VPOPCNTDQ);
-
         if (bitTest(regs.edx,  2)) features.add(Features::kAVX512_4VNNIW);
         if (bitTest(regs.edx,  3)) features.add(Features::kAVX512_4FMAPS);
+        if (bitTest(regs.edx,  8)) features.add(Features::kAVX512_VP2INTERSECT);
       }
+    }
+
+    if (maxSubLeafId >= 1 && features.hasAVX512_F()) {
+      cpuidQuery(&regs, 0x7, 1);
+
+      if (bitTest(regs.eax, 5)) features.add(Features::kAVX512_BF16);
     }
   }
 
@@ -286,13 +290,13 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
   // --------------------------------------------------------------------------
 
   if (maxId >= 0xD) {
-    cpuid_query(&regs, 0xD, 0);
+    cpuidQuery(&regs, 0xD, 0);
 
     // Both CPUID result and XCR0 has to be enabled to have support for MPX.
     if (((regs.eax & xcr0.eax) & 0x00000018u) == 0x00000018u && maybeMPX)
       features.add(Features::kMPX);
 
-    cpuid_query(&regs, 0xD, 1);
+    cpuidQuery(&regs, 0xD, 1);
     if (bitTest(regs.eax, 0)) features.add(Features::kXSAVEOPT);
     if (bitTest(regs.eax, 1)) features.add(Features::kXSAVEC);
     if (bitTest(regs.eax, 3)) features.add(Features::kXSAVES);
@@ -312,10 +316,10 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
   // to copy one DWORD at a time instead of performing a byte copy.
   uint32_t* brand = cpu._brand.u32;
   do {
-    cpuid_query(&regs, i);
+    cpuidQuery(&regs, i);
     switch (i) {
       case 0x80000000u:
-        maxId = std::min<uint32_t>(regs.eax, kHighestProcessedEAX);
+        maxId = Support::min<uint32_t>(regs.eax, kHighestProcessedEAX);
         break;
 
       case 0x80000001u:
@@ -329,13 +333,11 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
         if (bitTest(regs.ecx, 15)) features.add(Features::kLWP);
         if (bitTest(regs.ecx, 21)) features.add(Features::kTBM);
         if (bitTest(regs.ecx, 29)) features.add(Features::kMONITORX);
-
         if (bitTest(regs.edx, 20)) features.add(Features::kNX);
         if (bitTest(regs.edx, 21)) features.add(Features::kFXSROPT);
         if (bitTest(regs.edx, 22)) features.add(Features::kMMX2);
         if (bitTest(regs.edx, 27)) features.add(Features::kRDTSCP);
-        if (bitTest(regs.edx, 30)) features.add(Features::k3DNOW2,
-                                                Features::kMMX2);
+        if (bitTest(regs.edx, 30)) features.add(Features::k3DNOW2, Features::kMMX2);
         if (bitTest(regs.edx, 31)) features.add(Features::k3DNOW);
 
         if (cpu.hasFeature(Features::kAVX)) {
@@ -373,5 +375,4 @@ ASMJIT_FAVOR_SIZE void detectCpu(CpuInfo& cpu) noexcept {
 
 ASMJIT_END_SUB_NAMESPACE
 
-// [Guard]
 #endif // ASMJIT_BUILD_X86 && ASMJIT_ARCH_X86

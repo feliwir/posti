@@ -1,109 +1,254 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_CORE_INST_H
 #define _ASMJIT_CORE_INST_H
 
-// [Dependencies]
 #include "../core/cpuinfo.h"
 #include "../core/operand.h"
+#include "../core/string.h"
+#include "../core/support.h"
 
 ASMJIT_BEGIN_NAMESPACE
 
-//! \addtogroup asmjit_core_api
+//! \addtogroup asmjit_core
 //! \{
 
 // ============================================================================
-// [asmjit::OpInfo]
+// [asmjit::InstInfo]
 // ============================================================================
 
-//! Operand information.
-struct OpInfo {
-  //! Operand flags.
-  //!
-  //! Flags describe how the operand is accessed and some additional information.
-  enum Flags : uint32_t {
-    kRead                 = 0x00000001u, //!< Operand is Read.
-    kWrite                = 0x00000002u, //!< Operand is Written.
-    kRW                   = 0x00000003u, //!< Operand is ReadWrite.
-    kUse                  = 0x00000004u, //!< Operand is either Read or ReadWrite.
-    kOut                  = 0x00000008u  //!< Operand is always WriteOnly (not Read nor ReadWrite).
+// TODO: Finalize instruction info and make more x86::InstDB methods/structs private.
+
+/*
+
+struct InstInfo {
+  //! Architecture agnostic attributes.
+  enum Attributes : uint32_t {
+
+
   };
 
-  // --------------------------------------------------------------------------
-  // [Accessors]
-  // --------------------------------------------------------------------------
+  //! Instruction attributes.
+  uint32_t _attributes;
 
-  inline bool hasFlag(uint32_t flag) const noexcept { return (_flags & flag) != 0; }
-  inline uint32_t flags() const noexcept { return _flags; }
+  inline void reset() noexcept { memset(this, 0, sizeof(*this)); }
 
-  inline bool isRead() const noexcept { return hasFlag(kRead); }
-  inline bool isWrite() const noexcept { return hasFlag(kWrite); }
-
-  inline bool isReadOnly() const noexcept { return (_flags & kRW) == kRead; }
-  inline bool isWriteOnly() const noexcept { return (_flags & kRW) == kWrite; }
-  inline bool isReadWrite() const noexcept { return (_flags & kRW) == kRW; }
-
-  inline bool isUse() const noexcept { return hasFlag(kUse); }
-  inline bool isOut() const noexcept { return hasFlag(kOut); }
-
-  inline bool hasPhysId() const noexcept { return _physId != BaseReg::kIdBad; }
-  inline uint32_t physId() const noexcept { return _physId; }
-
-  // --------------------------------------------------------------------------
-  // [Members]
-  // --------------------------------------------------------------------------
-
-  uint16_t _flags;                       //!< Operand flags, see `Flags`.
-  uint8_t _physId;                       //!< Operand must be in this physical register.
-  uint8_t _reserved;                     //!< Reserved for future use.
+  inline uint32_t attributes() const noexcept { return _attributes; }
+  inline bool hasAttribute(uint32_t attr) const noexcept { return (_attributes & attr) != 0; }
 };
 
-//! Operand Read/Write information, used by `InstRWInfo`.
+//! Gets attributes of the given instruction.
+ASMJIT_API Error queryCommonInfo(uint32_t archId, uint32_t instId, InstInfo& out) noexcept;
+
+*/
+
+// ============================================================================
+// [asmjit::InstRWInfo / OpRWInfo]
+// ============================================================================
+
+//! Read/Write information related to a single operand, used by `InstRWInfo`.
 struct OpRWInfo {
+  //! Read/Write flags, see `OpRWInfo::Flags`.
+  uint32_t _opFlags;
+  //! Physical register index, if required.
+  uint8_t _physId;
+  //! Size of a possible memory operand that can replace a register operand.
+  uint8_t _rmSize;
+  //! Reserved for future use.
+  uint8_t _reserved[2];
+  //! Read bit-mask where each bit represents one byte read from Reg/Mem.
+  uint64_t _readByteMask;
+  //! Write bit-mask where each bit represents one byte written to Reg/Mem.
+  uint64_t _writeByteMask;
+  //! Zero/Sign extend bit-mask where each bit represents one byte written to Reg/Mem.
+  uint64_t _extendByteMask;
+
   //! Flags describe how the operand is accessed and some additional information.
   enum Flags : uint32_t {
-    kRead               = 0x00000001u, //!< Operand is Read.
-    kWrite              = 0x00000002u, //!< Operand is Written.
-    kRW                 = 0x00000003u, //!< Operand is ReadWrite.
-    kUse                = 0x00000004u, //!< Operand is either Read or ReadWrite.
-    kOut                = 0x00000008u, //!< Operand is always WriteOnly (not Read nor ReadWrite).
-    kZExt               = 0x00000010u  //!< The output is zero extended to a native register size.
+    //! Operand is read.
+    //!
+    //! \note This flag must be `0x00000001`.
+    kRead = 0x00000001u,
+
+    //! Operand is written.
+    //!
+    //! \note This flag must be `0x00000002`.
+    kWrite = 0x00000002u,
+
+    //! Operand is both read and written.
+    //!
+    //! \note This combination of flags must be `0x00000003`.
+    kRW = 0x00000003u,
+
+    //! Register operand can be replaced by a memory operand.
+    kRegMem = 0x00000004u,
+
+    //! The `extendByteMask()` represents a zero extension.
+    kZExt = 0x00000010u,
+
+    //! Register operand must use `physId()`.
+    kRegPhysId = 0x00000100u,
+    //! Base register of a memory operand must use `physId()`.
+    kMemPhysId = 0x00000200u,
+
+    //! This memory operand is only used to encode registers and doesn't access memory.
+    //!
+    //! X86 Specific
+    //! ------------
+    //!
+    //! Instructions that use such feature include BNDLDX, BNDSTX, and LEA.
+    kMemFake = 0x000000400u,
+
+    //! Base register of the memory operand will be read.
+    kMemBaseRead = 0x00001000u,
+    //! Base register of the memory operand will be written.
+    kMemBaseWrite = 0x00002000u,
+    //! Base register of the memory operand will be read & written.
+    kMemBaseRW = 0x00003000u,
+
+    //! Index register of the memory operand will be read.
+    kMemIndexRead = 0x00004000u,
+    //! Index register of the memory operand will be written.
+    kMemIndexWrite = 0x00008000u,
+    //! Index register of the memory operand will be read & written.
+    kMemIndexRW = 0x0000C000u,
+
+    //! Base register of the memory operand will be modified before the operation.
+    kMemBasePreModify = 0x00010000u,
+    //! Base register of the memory operand will be modified after the operation.
+    kMemBasePostModify = 0x00020000u
   };
 
-  inline bool hasFlag(uint32_t flag) const noexcept { return (_flags & flag) != 0; }
-  inline uint32_t flags() const noexcept { return _flags; }
+  static_assert(kRead  == 0x1, "OpRWInfo::kRead flag must be 0x1");
+  static_assert(kWrite == 0x2, "OpRWInfo::kWrite flag must be 0x2");
+  static_assert(kRegMem == 0x4, "OpRWInfo::kRegMem flag must be 0x4");
 
-  inline bool isRead() const noexcept { return hasFlag(kRead); }
-  inline bool isWrite() const noexcept { return hasFlag(kWrite); }
-  inline bool isReadWrite() const noexcept { return (_flags & kRW) == kRW; }
-  inline bool isReadOnly() const noexcept { return (_flags & kRW) == kRead; }
-  inline bool isWriteOnly() const noexcept { return (_flags & kRW) == kWrite; }
+  //! \name Reset
+  //! \{
 
-  inline bool isUse() const noexcept { return hasFlag(kUse); }
-  inline bool isOut() const noexcept { return hasFlag(kOut); }
+  inline void reset() noexcept { memset(this, 0, sizeof(*this)); }
+  inline void reset(uint32_t opFlags, uint32_t regSize, uint32_t physId = BaseReg::kIdBad) noexcept {
+    _opFlags = opFlags;
+    _physId = uint8_t(physId);
+    _rmSize = uint8_t((opFlags & kRegMem) ? regSize : uint32_t(0));
+    _resetReserved();
 
-  inline bool hasPhysId() const noexcept { return _physId != BaseReg::kIdBad; }
+    uint64_t mask = Support::lsbMask<uint64_t>(regSize);
+    _readByteMask = opFlags & kRead ? mask : uint64_t(0);
+    _writeByteMask = opFlags & kWrite ? mask : uint64_t(0);
+    _extendByteMask = 0;
+  }
+
+  inline void _resetReserved() noexcept {
+    memset(_reserved, 0, sizeof(_reserved));
+  }
+
+  //! \}
+
+  //! \name Operand Flags
+  //! \{
+
+  inline uint32_t opFlags() const noexcept { return _opFlags; }
+  inline bool hasOpFlag(uint32_t flag) const noexcept { return (_opFlags & flag) != 0; }
+
+  inline void addOpFlags(uint32_t flags) noexcept { _opFlags |= flags; }
+  inline void clearOpFlags(uint32_t flags) noexcept { _opFlags &= ~flags; }
+
+  inline bool isRead() const noexcept { return hasOpFlag(kRead); }
+  inline bool isWrite() const noexcept { return hasOpFlag(kWrite); }
+  inline bool isReadWrite() const noexcept { return (_opFlags & kRW) == kRW; }
+  inline bool isReadOnly() const noexcept { return (_opFlags & kRW) == kRead; }
+  inline bool isWriteOnly() const noexcept { return (_opFlags & kRW) == kWrite; }
+  inline bool isRm() const noexcept { return hasOpFlag(kRegMem); }
+  inline bool isZExt() const noexcept { return hasOpFlag(kZExt); }
+
+  //! \}
+
+  //! \name Physical Register ID
+  //! \{
+
   inline uint32_t physId() const noexcept { return _physId; }
+  inline bool hasPhysId() const noexcept { return _physId != BaseReg::kIdBad; }
+  inline void setPhysId(uint32_t physId) noexcept { _physId = uint8_t(physId); }
 
-  inline uint32_t index() const noexcept { return _index; }
-  inline uint32_t width() const noexcept { return _width; }
+  //! \}
 
-  uint8_t _flags;                      //!< Read/Write flags.
-  uint8_t _physId;                     //!< Physical register index, if required.
-  uint8_t _index;                      //!< Read/write register index [in bytes], `_index` is ignored if the operand is memory.
-  uint8_t _width;                      //!< Read/Write register/memory width [in bytes], zero means native width or imm/rel width.
+  //! \name Reg/Mem
+  //! \{
+
+  inline uint32_t rmSize() const noexcept { return _rmSize; }
+  inline void setRmSize(uint32_t rmSize) noexcept { _rmSize = uint8_t(rmSize); }
+
+  //! \}
+
+  //! \name Read & Write Masks
+  //! \{
+
+  inline uint64_t readByteMask() const noexcept { return _readByteMask; }
+  inline uint64_t writeByteMask() const noexcept { return _writeByteMask; }
+  inline uint64_t extendByteMask() const noexcept { return _extendByteMask; }
+
+  inline void setReadByteMask(uint64_t mask) noexcept { _readByteMask = mask; }
+  inline void setWriteByteMask(uint64_t mask) noexcept { _writeByteMask = mask; }
+  inline void setExtendByteMask(uint64_t mask) noexcept { _extendByteMask = mask; }
+
+  //! \}
 };
 
-//! Instruction Read/Write information.
+//! Read/Write information of an instruction.
 struct InstRWInfo {
-  uint32_t flags;
-  OpRWInfo extraReg;
-  OpRWInfo operands[Globals::kMaxOpCount];
+  //! Instruction flags.
+  uint32_t _instFlags;
+  //! Mask of flags read.
+  uint32_t _readFlags;
+  //! Mask of flags written.
+  uint32_t _writeFlags;
+  //! Count of operands.
+  uint8_t _opCount;
+  //! CPU feature required for replacing register operand with memory operand.
+  uint8_t _rmFeature;
+  //! Reserved for future use.
+  uint8_t _reserved[19];
+  //! Read/Write onfo of extra register (rep{} or kz{}).
+  OpRWInfo _extraReg;
+  //! Read/Write info of instruction operands.
+  OpRWInfo _operands[Globals::kMaxOpCount];
+
+  inline void reset() noexcept { memset(this, 0, sizeof(*this)); }
+
+  inline uint32_t instFlags() const noexcept { return _instFlags; }
+  inline bool hasInstFlag(uint32_t flag) const noexcept { return (_instFlags & flag) != 0; }
+
+  inline uint32_t opCount() const noexcept { return _opCount; }
+
+  inline uint32_t readFlags() const noexcept { return _readFlags; }
+  inline uint32_t writeFlags() const noexcept { return _writeFlags; }
+
+  //! Returns the CPU feature required to replace a register operand with memory
+  //! operand. If the returned feature is zero (none) then this instruction
+  //! either doesn't provide memory operand combination or there is no extra
+  //! CPU feature required.
+  //!
+  //! X86 Specific
+  //! ------------
+  //!
+  //! Some AVX+ instructions may require extra features for replacing registers
+  //! with memory operands, for example VPSLLDQ instruction only supports
+  //! 'reg/reg/imm' combination on AVX/AVX2 capable CPUs and requires AVX-512 for
+  //! 'reg/mem/imm' combination.
+  inline uint32_t rmFeature() const noexcept { return _rmFeature; }
+
+  inline const OpRWInfo& extraReg() const noexcept { return _extraReg; }
+  inline const OpRWInfo* operands() const noexcept { return _operands; }
+
+  inline const OpRWInfo& operand(size_t index) const noexcept {
+    ASMJIT_ASSERT(index < Globals::kMaxOpCount);
+    return _operands[index];
+  }
 };
 
 // ============================================================================
@@ -115,9 +260,18 @@ struct InstRWInfo {
 //! and `Operand[]` array.
 class BaseInst {
 public:
+  //! Instruction id.
+  uint32_t _id;
+  //! Instruction options.
+  uint32_t _options;
+  //! Extra register used by instruction (either REP register or AVX-512 selector).
+  RegOnly _extraReg;
+
   enum Id : uint32_t {
-    kIdNone               = 0x00000000u, //!< Invalid or uninitialized instruction id.
-    kIdAbstract           = 0x80000000u  //!< Abstract instruction (BaseBuilder and BaseCompiler).
+    //! Invalid or uninitialized instruction id.
+    kIdNone               = 0x00000000u,
+    //! Abstract instruction (BaseBuilder and BaseCompiler).
+    kIdAbstract           = 0x80000000u
   };
 
   enum Options : uint32_t {
@@ -170,25 +324,33 @@ public:
     //!       use HI elements, use `compiler.overwrite().sqrtss(x, y)`.
     kOptionOverwrite      = 0x00000020u,
 
-    kOptionShortForm      = 0x00000040u, //!< Emit short-form of the instruction.
-    kOptionLongForm       = 0x00000080u, //!< Emit long-form of the instruction.
+    //! Emit short-form of the instruction.
+    kOptionShortForm      = 0x00000040u,
+    //! Emit long-form of the instruction.
+    kOptionLongForm       = 0x00000080u,
 
-    kOptionTaken          = 0x00000100u, //!< Conditional jump is likely to be taken.
-    kOptionNotTaken       = 0x00000200u  //!< Conditional jump is unlikely to be taken.
+    //! Conditional jump is likely to be taken.
+    kOptionTaken          = 0x00000100u,
+    //! Conditional jump is unlikely to be taken.
+    kOptionNotTaken       = 0x00000200u
   };
 
   //! Control type.
   enum ControlType : uint32_t {
-    kControlNone          = 0u,          //!< No control type (doesn't jump).
-    kControlJump          = 1u,          //!< Unconditional jump.
-    kControlBranch        = 2u,          //!< Conditional jump (branch).
-    kControlCall          = 3u,          //!< Function call.
-    kControlReturn        = 4u           //!< Function return.
+    //! No control type (doesn't jump).
+    kControlNone = 0u,
+    //! Unconditional jump.
+    kControlJump = 1u,
+    //! Conditional jump (branch).
+    kControlBranch = 2u,
+    //! Function call.
+    kControlCall = 3u,
+    //! Function return.
+    kControlReturn = 4u
   };
 
-  // ------------------------------------------------------------------------
-  // [Init / Destroy]
-  // ------------------------------------------------------------------------
+  //! \name Construction & Destruction
+  //! \{
 
   inline explicit BaseInst(uint32_t id = 0, uint32_t options = 0) noexcept
     : _id(id),
@@ -205,19 +367,30 @@ public:
       _options(options),
       _extraReg { extraReg.signature(), extraReg.id() } {}
 
-  // ------------------------------------------------------------------------
-  // [Accessors]
-  // ------------------------------------------------------------------------
+  //! \}
+
+  //! \name Instruction ID
+  //! \{
 
   inline uint32_t id() const noexcept { return _id; }
   inline void setId(uint32_t id) noexcept { _id = id; }
   inline void resetId() noexcept { _id = 0; }
+
+  //! \}
+
+  //! \name Instruction Options
+  //! \{
 
   inline uint32_t options() const noexcept { return _options; }
   inline void setOptions(uint32_t options) noexcept { _options = options; }
   inline void addOptions(uint32_t options) noexcept { _options |= options; }
   inline void clearOptions(uint32_t options) noexcept { _options &= ~options; }
   inline void resetOptions() noexcept { _options = 0; }
+
+  //! \}
+
+  //! \name Extra Register
+  //! \{
 
   inline bool hasExtraReg() const noexcept { return _extraReg.isReg(); }
   inline RegOnly& extraReg() noexcept { return _extraReg; }
@@ -226,33 +399,50 @@ public:
   inline void setExtraReg(const RegOnly& reg) noexcept { _extraReg.init(reg); }
   inline void resetExtraReg() noexcept { _extraReg.reset(); }
 
-  // --------------------------------------------------------------------------
-  // [API]
-  // --------------------------------------------------------------------------
-
-  #ifndef ASMJIT_DISABLE_INST_API
-  //! Validate the given instruction.
-  ASMJIT_API static Error validate(uint32_t archId, const BaseInst& inst, const Operand_* operands, uint32_t count) noexcept;
-
-  //! Get Read/Write information of the given instruction.
-  ASMJIT_API static Error queryRWInfo(uint32_t archId, const BaseInst& inst, const Operand_* operands, uint32_t count, InstRWInfo& out) noexcept;
-
-  //! Get CPU features required by the given instruction.
-  ASMJIT_API static Error queryFeatures(uint32_t archId, const BaseInst& inst, const Operand_* operands, uint32_t count, BaseFeatures& out) noexcept;
-  #endif
-
-  // ------------------------------------------------------------------------
-  // [Members]
-  // ------------------------------------------------------------------------
-
-  uint32_t _id;
-  uint32_t _options;
-  RegOnly _extraReg;
+  //! \}
 };
+
+// ============================================================================
+// [asmjit::InstAPI]
+// ============================================================================
+
+//! Instruction API.
+namespace InstAPI {
+
+#ifndef ASMJIT_NO_TEXT
+//! Appends the name of the instruction specified by `instId` and `instOptions`
+//! into the `output` string.
+//!
+//! \note Instruction options would only affect instruction prefix & suffix,
+//! other options would be ignored. If `instOptions` is zero then only raw
+//! instruction name (without any additional text) will be appended.
+ASMJIT_API Error instIdToString(uint32_t archId, uint32_t instId, String& output) noexcept;
+
+//! Parses an instruction name in the given string `s`. Length is specified
+//! by `len` argument, which can be `SIZE_MAX` if `s` is known to be null
+//! terminated.
+//!
+//! The output is stored in `instId`.
+ASMJIT_API uint32_t stringToInstId(uint32_t archId, const char* s, size_t len) noexcept;
+#endif // !ASMJIT_NO_TEXT
+
+#ifndef ASMJIT_NO_VALIDATION
+//! Validates the given instruction.
+ASMJIT_API Error validate(uint32_t archId, const BaseInst& inst, const Operand_* operands, uint32_t opCount) noexcept;
+#endif // !ASMJIT_NO_VALIDATION
+
+#ifndef ASMJIT_NO_INTROSPECTION
+//! Gets Read/Write information of the given instruction.
+ASMJIT_API Error queryRWInfo(uint32_t archId, const BaseInst& inst, const Operand_* operands, uint32_t opCount, InstRWInfo& out) noexcept;
+
+//! Gets CPU features required by the given instruction.
+ASMJIT_API Error queryFeatures(uint32_t archId, const BaseInst& inst, const Operand_* operands, uint32_t opCount, BaseFeatures& out) noexcept;
+#endif // !ASMJIT_NO_INTROSPECTION
+
+} // {InstAPI}
 
 //! \}
 
 ASMJIT_END_NAMESPACE
 
-// [Guard]
 #endif // _ASMJIT_CORE_INST_H

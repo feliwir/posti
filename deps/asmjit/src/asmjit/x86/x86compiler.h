@@ -1,17 +1,15 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
-// [Guard]
 #ifndef _ASMJIT_X86_X86COMPILER_H
 #define _ASMJIT_X86_X86COMPILER_H
 
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_COMPILER
+#ifndef ASMJIT_NO_COMPILER
 
-// [Dependencies]
 #include "../core/compiler.h"
 #include "../core/datatypes.h"
 #include "../core/type.h"
@@ -19,7 +17,7 @@
 
 ASMJIT_BEGIN_SUB_NAMESPACE(x86)
 
-//! \addtogroup asmjit_x86_api
+//! \addtogroup asmjit_x86
 //! \{
 
 // ============================================================================
@@ -34,26 +32,20 @@ public:
   ASMJIT_NONCOPYABLE(Compiler)
   typedef BaseCompiler Base;
 
-  // --------------------------------------------------------------------------
-  // [Construction / Destruction]
-  // --------------------------------------------------------------------------
+  //! \name Construction & Destruction
+  //! \{
 
   ASMJIT_API explicit Compiler(CodeHolder* code = nullptr) noexcept;
   ASMJIT_API virtual ~Compiler() noexcept;
 
-  // --------------------------------------------------------------------------
-  // [Finalize]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  ASMJIT_API Error finalize() override;
+  //! \name Virtual Registers
+  //! \{
 
-  // --------------------------------------------------------------------------
-  // [VirtReg]
-  // --------------------------------------------------------------------------
-
-#ifndef ASMJIT_DISABLE_LOGGING
+#ifndef ASMJIT_NO_LOGGING
 # define ASMJIT_NEW_REG(OUT, PARAM, NAME_FMT)                 \
-    std::va_list ap;                                          \
+    va_list ap;                                               \
     va_start(ap, NAME_FMT);                                   \
     _newReg(OUT, PARAM, NAME_FMT, ap);                        \
     va_end(ap)
@@ -153,20 +145,22 @@ public:
 #undef ASMJIT_NEW_REG_USER
 #undef ASMJIT_NEW_REG
 
-  // --------------------------------------------------------------------------
-  // [Stack]
-  // --------------------------------------------------------------------------
+  //! \}
 
-  //! Create a new memory chunk allocated on the current function's stack.
+  //! \name Stack
+  //! \{
+
+  //! Creates a new memory chunk allocated on the current function's stack.
   inline Mem newStack(uint32_t size, uint32_t alignment, const char* name = nullptr) {
     Mem m(Globals::NoInit);
     _newStack(m, size, alignment, name);
     return m;
   }
 
-  // --------------------------------------------------------------------------
-  // [Const]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Constants
+  //! \{
 
   //! Put data to a constant-pool and get a memory reference to it.
   inline Mem newConst(uint32_t scope, const void* data, size_t size) {
@@ -209,18 +203,20 @@ public:
   //! Put a YMM `val` to a constant-pool.
   inline Mem newYmmConst(uint32_t scope, const Data256& val) noexcept { return newConst(scope, &val, 32); }
 
-  // --------------------------------------------------------------------------
-  // [Instruction Options]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Instruction Options
+  //! \{
 
   //! Force the compiler to not follow the conditional or unconditional jump.
   inline Compiler& unfollow() noexcept { _instOptions |= Inst::kOptionUnfollow; return *this; }
   //! Tell the compiler that the destination variable will be overwritten.
   inline Compiler& overwrite() noexcept { _instOptions |= Inst::kOptionOverwrite; return *this; }
 
-  // --------------------------------------------------------------------------
-  // [Emit]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Function Call & Ret Intrinsics
+  //! \{
 
   //! Call a function.
   inline FuncCallNode* call(const Gp& dst, const FuncSignature& sign) { return addCall(Inst::kIdCall, dst, sign); }
@@ -240,17 +236,26 @@ public:
   //! \overload
   inline FuncRetNode* ret(const BaseReg& o0, const BaseReg& o1) { return addRet(o0, o1); }
 
-  // --------------------------------------------------------------------------
-  // [Events]
-  // --------------------------------------------------------------------------
+  //! \}
+
+  //! \name Finalize
+  //! \{
+
+  ASMJIT_API Error finalize() override;
+
+  //! \}
+
+  //! \name Events
+  //! \{
 
   ASMJIT_API Error onAttach(CodeHolder* code) noexcept override;
+
+  //! \}
 };
 
 //! \}
 
 ASMJIT_END_SUB_NAMESPACE
 
-// [Guard]
-#endif // !ASMJIT_DISABLE_COMPILER
+#endif // !ASMJIT_NO_COMPILER
 #endif // _ASMJIT_X86_X86COMPILER_H

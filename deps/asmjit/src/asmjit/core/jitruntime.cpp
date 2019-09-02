@@ -1,13 +1,13 @@
 // [AsmJit]
-// Complete x86/x64 JIT and Remote Assembler for C++.
+// Machine Code Generation for C++.
 //
 // [License]
-// ZLIB - See LICENSE.md file in the package.
+// Zlib - See LICENSE.md file in the package.
 
 #define ASMJIT_EXPORTS
 
 #include "../core/build.h"
-#ifndef ASMJIT_DISABLE_JIT
+#ifndef ASMJIT_NO_JIT
 
 #include "../core/cpuinfo.h"
 #include "../core/jitruntime.h"
@@ -18,55 +18,55 @@ ASMJIT_BEGIN_NAMESPACE
 // [asmjit::JitRuntime - Utilities]
 // ============================================================================
 
+// Only useful on non-x86 architectures.
 static inline void JitRuntime_flushInstructionCache(const void* p, size_t size) noexcept {
-  // Only useful on non-x86 architectures.
-#if !ASMJIT_ARCH_X86
-# if ASMJIT_OS_WINDOWS
+#if defined(_WIN32) && !ASMJIT_ARCH_X86
   // Windows has a built-in support in `kernel32.dll`.
   ::FlushInstructionCache(::GetCurrentProcess(), p, size);
-# endif
 #else
   ASMJIT_UNUSED(p);
   ASMJIT_UNUSED(size);
 #endif
 }
 
+// X86 Target
+// ----------
+//
+//   - 32-bit - Linux, OSX, BSD, and apparently also Haiku guarantee 16-byte
+//              stack alignment. Other operating systems are assumed to have
+//              4-byte alignment by default for safety reasons.
+//   - 64-bit - stack must be aligned to 16 bytes.
+//
+// ARM Target
+// ----------
+//
+//   - 32-bit - Stack must be aligned to 8 bytes.
+//   - 64-bit - Stack must be aligned to 16 bytes (hardware requirement).
 static inline uint32_t JitRuntime_detectNaturalStackAlignment() noexcept {
-  // Alignment is assumed to match the pointer-size by default.
-  uint32_t alignment = sizeof(intptr_t);
-
-  // X86 Target
-  // ----------
-  //
-  //   - 32-bit - stack must be aligned to at least 4 bytes. Modern Linux, Mac,
-  //              and BSD guarantee 16-byte stack alignment even on 32-bit. I'm
-  //              not sure about other unices as 16-byte alignment was a recent
-  //              addition to the specification.
-  //   - 64-bit - stack must be aligned to at least 16 bytes.
-  #if ASMJIT_ARCH_X86
-  unsigned int kIsModernOS = ASMJIT_OS_BSD    |
-                             ASMJIT_OS_MAC    |
-                             ASMJIT_OS_LINUX  ;
-  alignment = (ASMJIT_ARCH_X86 == 64 || kIsModernOS != 0) ? 16 : 4;
-  #endif
-
-  // ARM Target
-  // ----------
-  //
-  //   - 32-bit - Stack must be aligned to at least 8 bytes.
-  //   - 64-bit - Stack must be aligned to at least 16 bytes (hardware requirement).
-  #if ASMJIT_ARCH_ARM
-  alignment = (ASMJIT_ARCH_ARM == 32) ? 8 : 16;
-  #endif
-
-  return alignment;
+#if ASMJIT_ARCH_BITS == 64 || \
+    defined(__APPLE__    ) || \
+    defined(__DragonFly__) || \
+    defined(__HAIKU__    ) || \
+    defined(__FreeBSD__  ) || \
+    defined(__NetBSD__   ) || \
+    defined(__OpenBSD__  ) || \
+    defined(__bsdi__     ) || \
+    defined(__linux__    )
+  return 16;
+#elif ASMJIT_ARCH_ARM
+  return 8;
+#else
+  return uint32_t(sizeof(uintptr_t));
+#endif
 }
 
 // ============================================================================
 // [asmjit::JitRuntime - Construction / Destruction]
 // ============================================================================
 
-JitRuntime::JitRuntime() noexcept {
+JitRuntime::JitRuntime(const JitAllocator::CreateParams* params) noexcept
+  : _allocator(params) {
+
   // Setup target properties.
   _targetType = kTargetJit;
   _codeInfo._archInfo       = CpuInfo::host().archInfo();
@@ -82,31 +82,49 @@ JitRuntime::~JitRuntime() noexcept {}
 // ============================================================================
 
 Error JitRuntime::_add(void** dst, CodeHolder* code) noexcept {
-  size_t codeSize = code->codeSize();
-  if (ASMJIT_UNLIKELY(codeSize == 0)) {
-    *dst = nullptr;
+  *dst = nullptr;
+
+  ASMJIT_PROPAGATE(code->flatten());
+  ASMJIT_PROPAGATE(code->resolveUnresolvedLinks());
+
+  size_t estimatedCodeSize = code->codeSize();
+  if (ASMJIT_UNLIKELY(estimatedCodeSize == 0))
     return DebugUtils::errored(kErrorNoCodeGenerated);
+
+  uint8_t* ro;
+  uint8_t* rw;
+  ASMJIT_PROPAGATE(_allocator.alloc((void**)&ro, (void**)&rw, estimatedCodeSize));
+
+  // Relocate the code.
+  Error err = code->relocateToBase(uintptr_t((void*)ro));
+  if (ASMJIT_UNLIKELY(err)) {
+    _allocator.release(ro);
+    return err;
   }
 
-  void* p = _allocator.alloc(codeSize);
-  if (ASMJIT_UNLIKELY(!p)) {
-    *dst = nullptr;
-    return DebugUtils::errored(kErrorNoVirtualMemory);
+  // Recalculate the final code size and shrink the memory we allocated for it
+  // in case that some relocations didn't require records in an address table.
+  size_t codeSize = code->codeSize();
+
+  for (Section* section : code->_sections) {
+    size_t offset = size_t(section->offset());
+    size_t bufferSize = size_t(section->bufferSize());
+    size_t virtualSize = size_t(section->virtualSize());
+
+    ASMJIT_ASSERT(offset + bufferSize <= codeSize);
+    memcpy(rw + offset, section->data(), bufferSize);
+
+    if (virtualSize > bufferSize) {
+      ASMJIT_ASSERT(offset + virtualSize <= codeSize);
+      memset(rw + offset + bufferSize, 0, virtualSize - bufferSize);
+    }
   }
 
-  // Relocate the code and release the unused memory back to `JitAllocator`.
-  size_t relocSize = code->relocate(p);
-  if (ASMJIT_UNLIKELY(relocSize == 0)) {
-    *dst = nullptr;
-    _allocator.release(p);
-    return DebugUtils::errored(kErrorInvalidState);
-  }
+  if (codeSize < estimatedCodeSize)
+    _allocator.shrink(ro, codeSize);
 
-  if (relocSize < codeSize)
-    _allocator.shrink(p, relocSize);
-
-  flush(p, relocSize);
-  *dst = p;
+  flush(ro, codeSize);
+  *dst = ro;
 
   return kErrorOk;
 }

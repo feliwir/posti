@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include "builtins.hpp"
+#include "pscore_export.hpp"
 
 namespace ps
 {
@@ -15,7 +16,7 @@ enum class ScriptMode
   Embedded,
 };
 
-class Interpreter
+class PSCORE_EXPORT Interpreter
 {
 public:
   Interpreter(ScriptMode mode = ScriptMode::Standalone);
