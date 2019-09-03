@@ -19,7 +19,7 @@ TEST(Interpreter, Arithmetic)
 
 	EXPECT_EQ(object->GetType(), ps::ObjectType::Integer) << "Expected integer!";
 
-	auto& integer = std::static_pointer_cast<ps::IntegerObject>(object);
+	auto integer = std::static_pointer_cast<ps::IntegerObject>(object);
 
 	ASSERT_NE(integer, nullptr) << "Object is not integer!";
 
