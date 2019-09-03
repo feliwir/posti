@@ -7,6 +7,8 @@ addons:
   apt:
     packages: lcov
 
+cache: ccache
+
 script:
   - mkdir build && cd build
   - cmake -DBUILD_TESTING=ON -DCODE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug ..
