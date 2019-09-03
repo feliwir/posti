@@ -40,7 +40,7 @@ std::shared_ptr<ps::Object> ps::Interpreter::DictLookup(std::shared_ptr<Object> 
   return nullptr;
 }
 
-void ps::Interpreter::Load(std::istream &input)
+bool ps::Interpreter::Load(std::istream &input)
 {
   Parser parser(input);
 
@@ -56,8 +56,14 @@ void ps::Interpreter::Load(std::istream &input)
         //lookup in the dictionary
         auto value = DictLookup(obj);
 
+        //lookup failed
+        if (value == nullptr)
+          return false;
+
         RunFunction(value);
       }
     }
   }
+
+  return true;
 }

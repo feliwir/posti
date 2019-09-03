@@ -20,7 +20,7 @@ class PSCORE_EXPORT Interpreter
 {
 public:
   Interpreter(ScriptMode mode = ScriptMode::Standalone);
-  void Load(std::istream &input);
+  bool Load(std::istream &input);
 
   inline std::stack<std::shared_ptr<Object>> &GetOperandStack()
   {

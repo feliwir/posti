@@ -26,13 +26,14 @@ if(CODE_COVERAGE)
 endif()
 
 if(MSVC)
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
 endif()
 
 add_subdirectory(deps)
 add_subdirectory(src)
 
 if(BUILD_TESTING)
-    add_subdirectory(test)
+  enable_testing()
+  add_subdirectory(test)
 endif()

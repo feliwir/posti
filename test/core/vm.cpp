@@ -7,7 +7,7 @@ TEST(Interpreter, Arithmetic)
 	std::stringstream input(content);
 
 	ps::Interpreter psi;
-	psi.Load(input);
+	EXPECT_TRUE(psi.Load(input));
 
 	const auto& stack = psi.GetOperandStack();
 	ASSERT_EQ(stack.size(), 1) << "Stack size should have been 1!";
@@ -44,5 +44,6 @@ TEST(Interpreter, Path)
 
 	std::stringstream input(content);
 	ps::Interpreter psi;
-	psi.Load(input);
+	// Missing "newpath"
+	EXPECT_FALSE(psi.Load(input));
 }
